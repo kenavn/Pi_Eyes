@@ -110,7 +110,7 @@ def connect_joystick():
     auto_blink = False
     auto_pupil = False
     send_message("auto_movement_off")
-    send_message("auto_blink_off")
+    # send_message("auto_blink_off")
     send_message("auto_pupil_off")
     print("Joystick connected")
 

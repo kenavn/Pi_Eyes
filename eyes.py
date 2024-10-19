@@ -268,8 +268,8 @@ def process_udp_messages():
                 prev_auto_blink = auto_blink
                 prev_auto_pupil = auto_pupil  # Store previous auto pupil state
                 auto_movement = False
-                auto_blink = False
-                auto_pupil = False  # Turn off auto pupil when joystick connected
+                # auto_blink = False
+                # auto_pupil = False  # Turn off auto pupil when joystick connected
             elif message == "joystick_disconnected":
                 joystick_connected = False
                 auto_movement = prev_auto_movement
