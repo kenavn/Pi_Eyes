@@ -308,7 +308,7 @@ def decode_message(data):
 
 
 def process_udp_messages():
-    global auto_movement, auto_blink, auto_pupil, joystick_x, joystick_y, blink_left, blink_right
+    global auto_movement, auto_blink, auto_pupil, joystick_x, joystick_y
     global joystick_connected, prev_auto_movement, prev_auto_blink, prev_auto_pupil
     global left_eyelid_position, right_eyelid_position
     global blink_left_active, blink_right_active
@@ -319,15 +319,13 @@ def process_udp_messages():
                 joystick_connected = True
                 prev_auto_movement = auto_movement
                 prev_auto_blink = auto_blink
-                prev_auto_pupil = auto_pupil  # Store previous auto pupil state
+                prev_auto_pupil = auto_pupil
                 auto_movement = False
-                # auto_blink = False
-                # auto_pupil = False  # Turn off auto pupil when joystick connected
             elif message == "joystick_disconnected":
                 joystick_connected = False
                 auto_movement = prev_auto_movement
                 auto_blink = prev_auto_blink
-                auto_pupil = prev_auto_pupil  # Restore previous auto pupil state
+                auto_pupil = prev_auto_pupil
             elif message == "auto_movement_on":
                 if not joystick_connected:
                     auto_movement = True
@@ -344,15 +342,14 @@ def process_udp_messages():
                 if not joystick_connected:
                     auto_blink = False
                 prev_auto_blink = False
-            elif message == "auto_pupil_on":  # New message for auto pupil control
+            elif message == "auto_pupil_on":
                 if not joystick_connected:
                     auto_pupil = True
                 prev_auto_pupil = True
-            elif message == "auto_pupil_off":  # New message for auto pupil control
+            elif message == "auto_pupil_off":
                 if not joystick_connected:
                     auto_pupil = False
                 prev_auto_pupil = False
-            # Handle eyelid position messages
             elif message.startswith("left_eyelid"):
                 _, position = message.split(',')
                 left_eyelid_position = float(position)
@@ -364,13 +361,6 @@ def process_udp_messages():
                     _, x, y = message.split(',')
                     joystick_x = float(x)
                     joystick_y = float(y)
-            elif message == "blink_left":
-                blink_left = True
-            elif message == "blink_right":
-                blink_right = True
-            elif message == "blink_both":
-                blink_left = True
-                blink_right = True
             elif message == "blink_left_start":
                 blink_left_active = True
             elif message == "blink_left_end":
