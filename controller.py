@@ -7,6 +7,7 @@ import atexit
 import struct
 import csv
 from datetime import datetime, timedelta
+import queue
 import argparse
 
 
@@ -15,6 +16,10 @@ class EyeController:
         self.UDP_IP = "10.0.1.151"  # Replace with the IP of your eye device
         self.UDP_PORT = 5005  # Make sure this matches the port in your eye script
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        self.record_queue = queue.Queue()
+        self.disk_writer_thread = None
+        self.recording_start_time = None
 
         self.current_eye_x = 0
         self.current_eye_y = 0
@@ -286,17 +291,30 @@ class EyeController:
             self.last_state = {}
             self.recording_start_time = datetime.now()
             self.last_state_time = self.recording_start_time
+
+            # Start the disk writer thread
+            self.disk_writer_thread = threading.Thread(
+                target=self.disk_writer, daemon=True)
+            self.disk_writer_thread.start()
+
             print(f"Recording started: {filename}")
 
     def stop_recording(self):
         if self.is_recording:
-            if self.last_state:
-                self.record_state_change(force=True)
             self.is_recording = False
+
+            # Wait for the disk writer thread to finish processing
+            if self.disk_writer_thread is not None:
+                self.disk_writer_thread.join()
+                self.disk_writer_thread = None
+
             self.record_file.close()
             print("Recording stopped")
 
-    def record_state_change(self, force=False):
+    def record_state_change(self):
+        if not self.is_recording:
+            return
+
         current_time = datetime.now()
         current_state = {
             'eye_x': self.current_eye_x,
@@ -307,25 +325,23 @@ class EyeController:
             'right_eye_closed': self.right_eye_closed
         }
 
-        if force or current_state != self.last_state:
-            if self.last_state:
-                time_ms = int(
-                    (current_time - self.recording_start_time).total_seconds() * 1000)
-                self.record_writer.writerow([
-                    time_ms,
-                    self.last_state['eye_x'],
-                    self.last_state['eye_y'],
-                    self.last_state['left_eyelid'],
-                    self.last_state['right_eyelid'],
-                    self.last_state['left_eye_closed'],
-                    self.last_state['right_eye_closed']
-                ])
-                print(f"Recorded state change at {time_ms}ms: {
-                      current_state}")  # Debug print
-            self.last_state = current_state
-            self.last_state_time = current_time
-        else:
-            print(f"No state change detected: {current_state}")  # Debug print
+        # Calculate the time since recording started
+        time_ms = int(
+            (current_time - self.recording_start_time).total_seconds() * 1000)
+
+        # Put the state change into the queue
+        self.record_queue.put([
+            time_ms,
+            current_state['eye_x'],
+            current_state['eye_y'],
+            current_state['left_eyelid'],
+            current_state['right_eyelid'],
+            current_state['left_eye_closed'],
+            current_state['right_eye_closed']
+        ])
+
+        self.last_state = current_state
+        self.last_state_time = current_time
 
     def replay_recording(self, filename, loop=False, freeze=False):
         print(f"Replaying recording: {filename}")
@@ -421,6 +437,17 @@ class EyeController:
         except KeyboardInterrupt:
             print("Exiting...")
             self.cleanup()
+
+    def disk_writer(self):
+        while self.is_recording or not self.record_queue.empty():
+            try:
+                # Wait for a state change to be available in the queue
+                state_change = self.record_queue.get(timeout=0.1)
+                # Write the state change to the CSV file
+                self.record_writer.writerow(state_change)
+                self.record_queue.task_done()
+            except queue.Empty:
+                continue
 
     def cleanup(self):
         print("\nDisconnecting joystick and exiting...")
