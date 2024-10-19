@@ -111,7 +111,7 @@ def connect_joystick():
     auto_pupil = False
     send_message("auto_movement_off")
     # send_message("auto_blink_off")
-    send_message("auto_pupil_off")
+    # send_message("auto_pupil_off")
     print("Joystick connected")
 
 
@@ -179,7 +179,7 @@ def gamepad_reader():
 def eye_controller():
     global joystick_connected
     last_blink_time = 0
-    blink_cooldown = 0.5  # Cooldown time between blinks in seconds
+    blink_cooldown = 0.2  # Reduced cooldown time for more responsive blinking
     last_x = 0
     last_y = 0
     last_eyelid_position = 0
@@ -204,7 +204,7 @@ def eye_controller():
                 set_eyelids(eyelid_position)
                 last_eyelid_position = eyelid_position
 
-            # Use buttons for blinking (keep existing blink logic)
+            # Handle blinking with buttons
             current_time = time.time()
             if current_time - last_blink_time > blink_cooldown:
                 if gamepad_state["BTN_WEST"] == 1:  # X on Xbox, Square on PS4

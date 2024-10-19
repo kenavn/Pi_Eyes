@@ -435,6 +435,20 @@ def frame(p):
 
     frames += 1
 
+    # Function to start a blink
+    def start_blink(eye):
+        global blinkStateLeft, blinkStateRight, blinkStartTimeLeft, blinkStartTimeRight, blinkDurationLeft, blinkDurationRight
+        nonlocal now
+        duration = random.uniform(0.035, 0.06)
+        if eye in ['left', 'both'] and blinkStateLeft == 0:
+            blinkStateLeft = 1  # ENBLINK
+            blinkStartTimeLeft = now
+            blinkDurationLeft = duration
+        if eye in ['right', 'both'] and blinkStateRight == 0:
+            blinkStateRight = 1  # ENBLINK
+            blinkStartTimeRight = now
+            blinkDurationRight = duration
+
     if (not auto_movement) or joystick_connected:
         # Eye position from UDP input
         curX = -30.0 + joystick_x * 60.0
@@ -506,65 +520,33 @@ def frame(p):
 
     if auto_blink and (now - timeOfLastBlink) >= timeToNextBlink:
         timeOfLastBlink = now
-        duration = random.uniform(0.035, 0.06)
-        if blinkStateLeft != 1:
-            blinkStateLeft = 1  # ENBLINK
-            blinkStartTimeLeft = now
-            blinkDurationLeft = duration
-        if blinkStateRight != 1:
-            blinkStateRight = 1  # ENBLINK
-            blinkStartTimeRight = now
-            blinkDurationRight = duration
-        timeToNextBlink = duration * 3 + random.uniform(0.0, 4.0)
+        start_blink('both')
+        timeToNextBlink = random.uniform(3.0, 7.0)
 
-    if blinkStateLeft:  # Left eye currently winking/blinking?
-        # Check if blink time has elapsed...
+    if blinkStateLeft:
         if (now - blinkStartTimeLeft) >= blinkDurationLeft:
-            # Yes...increment blink state, unless...
-            if (blinkStateLeft == 1 and  # Enblinking and...
-                ((BLINK_PIN is not None and    # blink pin held, or...
-                  BLINK_PIN.value == False) or
-                 (WINK_L_PIN is not None and    # wink pin held
-                 WINK_L_PIN.value == False))):
-                # Don't advance yet; eye is held closed
-                pass
+            blinkStateLeft += 1
+            if blinkStateLeft > 2:
+                blinkStateLeft = 0  # NOBLINK
             else:
-                blinkStateLeft += 1
-                if blinkStateLeft > 2:
-                    blinkStateLeft = 0  # NOBLINK
-                else:
-                    blinkDurationLeft *= 2.0
-                    blinkStartTimeLeft = now
+                blinkDurationLeft *= 2.0
+                blinkStartTimeLeft = now
     else:
         if blink_left:
-            blinkStateLeft = 1  # ENBLINK
-            blinkStartTimeLeft = now
-            blinkDurationLeft = random.uniform(0.035, 0.06)
+            start_blink('left')
             blink_left = False
 
-    if blinkStateRight:  # Right eye currently winking/blinking?
-        # Check if blink time has elapsed...
+    if blinkStateRight:
         if (now - blinkStartTimeRight) >= blinkDurationRight:
-            # Yes...increment blink state, unless...
-            if (blinkStateRight == 1 and  # Enblinking and...
-                ((BLINK_PIN is not None and    # blink pin held, or...
-                  BLINK_PIN.value == False) or
-                 (WINK_R_PIN is not None and    # wink pin held
-                 WINK_R_PIN.value == False))):
-                # Don't advance yet; eye is held closed
-                pass
+            blinkStateRight += 1
+            if blinkStateRight > 2:
+                blinkStateRight = 0  # NOBLINK
             else:
-                blinkStateRight += 1
-                if blinkStateRight > 2:
-                    blinkStateRight = 0  # NOBLINK
-                else:
-                    blinkDurationRight *= 2.0
-                    blinkStartTimeRight = now
+                blinkDurationRight *= 2.0
+                blinkStartTimeRight = now
     else:
         if blink_right:
-            blinkStateRight = 1  # ENBLINK
-            blinkStartTimeRight = now
-            blinkDurationRight = random.uniform(0.035, 0.06)
+            start_blink('right')
             blink_right = False
 
     if BLINK_PIN is not None and BLINK_PIN.value == False:
@@ -578,59 +560,52 @@ def frame(p):
             blinkStartTimeRight = now
             blinkDurationRight = duration
 
+    # Calculate eyelid positions
     if TRACKING:
         n = 0.4 - curY / 60.0
-        if n < 0.0:
-            n = 0.0
-        elif n > 1.0:
-            n = 1.0
+        n = max(0, min(1, n))
         trackingPos = (trackingPos * 3.0 + n) * 0.25
         if CRAZY_EYES:
             n = 0.4 - curYR / 60.0
-            if n < 0.0:
-                n = 0.0
-            elif n > 1.0:
-                n = 1.0
+            n = max(0, min(1, n))
             trackingPosR = (trackingPosR * 3.0 + n) * 0.25
 
-    if auto_blink:
-        if blinkStateLeft:
-            n = (now - blinkStartTimeLeft) / blinkDurationLeft
-            if n > 1.0:
-                n = 1.0
-            if blinkStateLeft == 2:
-                n = 1.0 - n
-        else:
-            n = 0.0
-        newLeftUpperLidWeight = trackingPos + (n * (1.0 - trackingPos))
-        newLeftLowerLidWeight = (1.0 - trackingPos) + (n * trackingPos)
+    leftUpperLidWeight = trackingPos
+    leftLowerLidWeight = 1.0 - trackingPos
+    rightUpperLidWeight = trackingPos if not CRAZY_EYES else trackingPosR
+    rightLowerLidWeight = 1.0 - \
+        (trackingPos if not CRAZY_EYES else trackingPosR)
 
-        if blinkStateRight:
-            n = (now - blinkStartTimeRight) / blinkDurationRight
-            if n > 1.0:
-                n = 1.0
-            if blinkStateRight == 2:
-                n = 1.0 - n
-        else:
-            n = 0.0
-        if CRAZY_EYES:
-            newRightUpperLidWeight = trackingPosR + (n * (1.0 - trackingPosR))
-            newRightLowerLidWeight = (1.0 - trackingPosR) + (n * trackingPosR)
-        else:
-            newRightUpperLidWeight = trackingPos + (n * (1.0 - trackingPos))
-            newRightLowerLidWeight = (1.0 - trackingPos) + (n * trackingPos)
-    else:
-        # Use UDP-controlled eyelid positions
-        newLeftUpperLidWeight = left_eyelid_position
-        newLeftLowerLidWeight = left_eyelid_position
-        newRightUpperLidWeight = right_eyelid_position
-        newRightLowerLidWeight = right_eyelid_position
+    # Apply blinking effect
+    if blinkStateLeft:
+        n = (now - blinkStartTimeLeft) / blinkDurationLeft
+        n = min(1.0, n)
+        if blinkStateLeft == 2:
+            n = 1.0 - n
+        leftUpperLidWeight += n * (1.0 - leftUpperLidWeight)
+        leftLowerLidWeight += n * (1.0 - leftLowerLidWeight)
 
-    if (luRegen or (abs(newLeftUpperLidWeight - prevLeftUpperLidWeight) >=
+    if blinkStateRight:
+        n = (now - blinkStartTimeRight) / blinkDurationRight
+        n = min(1.0, n)
+        if blinkStateRight == 2:
+            n = 1.0 - n
+        rightUpperLidWeight += n * (1.0 - rightUpperLidWeight)
+        rightLowerLidWeight += n * (1.0 - rightLowerLidWeight)
+
+    # Use UDP-controlled eyelid positions if provided
+    if not auto_blink:
+        leftUpperLidWeight = max(leftUpperLidWeight, left_eyelid_position)
+        leftLowerLidWeight = max(leftLowerLidWeight, left_eyelid_position)
+        rightUpperLidWeight = max(rightUpperLidWeight, right_eyelid_position)
+        rightLowerLidWeight = max(rightLowerLidWeight, right_eyelid_position)
+
+    # Update eyelid meshes
+    if (luRegen or (abs(leftUpperLidWeight - prevLeftUpperLidWeight) >=
                     upperLidRegenThreshold)):
         newLeftUpperLidPts = points_interp(upperLidOpenPts,
-                                           upperLidClosedPts, newLeftUpperLidWeight)
-        if newLeftUpperLidWeight > prevLeftUpperLidWeight:
+                                           upperLidClosedPts, leftUpperLidWeight)
+        if leftUpperLidWeight > prevLeftUpperLidWeight:
             leftUpperEyelid.re_init(pts=points_mesh(
                 (upperLidEdgePts, prevLeftUpperLidPts,
                  newLeftUpperLidPts), 5, 0, False))
@@ -639,16 +614,16 @@ def frame(p):
                 (upperLidEdgePts, newLeftUpperLidPts,
                  prevLeftUpperLidPts), 5, 0, False))
         prevLeftUpperLidPts = newLeftUpperLidPts
-        prevLeftUpperLidWeight = newLeftUpperLidWeight
+        prevLeftUpperLidWeight = leftUpperLidWeight
         luRegen = True
     else:
         luRegen = False
 
-    if (llRegen or (abs(newLeftLowerLidWeight - prevLeftLowerLidWeight) >=
+    if (llRegen or (abs(leftLowerLidWeight - prevLeftLowerLidWeight) >=
                     lowerLidRegenThreshold)):
         newLeftLowerLidPts = points_interp(lowerLidOpenPts,
-                                           lowerLidClosedPts, newLeftLowerLidWeight)
-        if newLeftLowerLidWeight > prevLeftLowerLidWeight:
+                                           lowerLidClosedPts, leftLowerLidWeight)
+        if leftLowerLidWeight > prevLeftLowerLidWeight:
             leftLowerEyelid.re_init(pts=points_mesh(
                 (lowerLidEdgePts, prevLeftLowerLidPts,
                  newLeftLowerLidPts), 5, 0, False))
@@ -656,17 +631,17 @@ def frame(p):
             leftLowerEyelid.re_init(pts=points_mesh(
                 (lowerLidEdgePts, newLeftLowerLidPts,
                  prevLeftLowerLidPts), 5, 0, False))
-        prevLeftLowerLidWeight = newLeftLowerLidWeight
+        prevLeftLowerLidWeight = leftLowerLidWeight
         prevLeftLowerLidPts = newLeftLowerLidPts
         llRegen = True
     else:
         llRegen = False
 
-    if (ruRegen or (abs(newRightUpperLidWeight - prevRightUpperLidWeight) >=
+    if (ruRegen or (abs(rightUpperLidWeight - prevRightUpperLidWeight) >=
                     upperLidRegenThreshold)):
         newRightUpperLidPts = points_interp(upperLidOpenPts,
-                                            upperLidClosedPts, newRightUpperLidWeight)
-        if newRightUpperLidWeight > prevRightUpperLidWeight:
+                                            upperLidClosedPts, rightUpperLidWeight)
+        if rightUpperLidWeight > prevRightUpperLidWeight:
             rightUpperEyelid.re_init(pts=points_mesh(
                 (upperLidEdgePts, prevRightUpperLidPts,
                  newRightUpperLidPts), 5, 0, True))
@@ -674,17 +649,17 @@ def frame(p):
             rightUpperEyelid.re_init(pts=points_mesh(
                 (upperLidEdgePts, newRightUpperLidPts,
                  prevRightUpperLidPts), 5, 0, True))
-        prevRightUpperLidWeight = newRightUpperLidWeight
+        prevRightUpperLidWeight = rightUpperLidWeight
         prevRightUpperLidPts = newRightUpperLidPts
         ruRegen = True
     else:
         ruRegen = False
 
-    if (rlRegen or (abs(newRightLowerLidWeight - prevRightLowerLidWeight) >=
+    if (rlRegen or (abs(rightLowerLidWeight - prevRightLowerLidWeight) >=
                     lowerLidRegenThreshold)):
         newRightLowerLidPts = points_interp(lowerLidOpenPts,
-                                            lowerLidClosedPts, newRightLowerLidWeight)
-        if newRightLowerLidWeight > prevRightLowerLidWeight:
+                                            lowerLidClosedPts, rightLowerLidWeight)
+        if rightLowerLidWeight > prevRightLowerLidWeight:
             rightLowerEyelid.re_init(pts=points_mesh(
                 (lowerLidEdgePts, prevRightLowerLidPts,
                  newRightLowerLidPts), 5, 0, True))
@@ -692,7 +667,7 @@ def frame(p):
             rightLowerEyelid.re_init(pts=points_mesh(
                 (lowerLidEdgePts, newRightLowerLidPts,
                  prevRightLowerLidPts), 5, 0, True))
-        prevRightLowerLidWeight = newRightLowerLidWeight
+        prevRightLowerLidWeight = rightLowerLidWeight
         prevRightLowerLidPts = newRightLowerLidPts
         rlRegen = True
     else:
