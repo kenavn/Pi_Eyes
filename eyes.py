@@ -9,6 +9,7 @@
 # Requires adafruit-blinka (CircuitPython APIs for Python on big hardware)
 
 import socket
+import struct
 from queue import Queue, Empty
 
 import argparse
@@ -248,7 +249,7 @@ def udp_thread():
     while True:
         try:
             data, addr = sock.recvfrom(1024)
-            message = data.decode().strip()
+            message = decode_message(data)
             message_queue.put(message)
         except socket.error:
             time.sleep(0.01)  # Small sleep to prevent busy-waiting
@@ -257,6 +258,51 @@ def udp_thread():
 # Start UDP thread
 udp_thread = threading.Thread(target=udp_thread, daemon=True)
 udp_thread.start()
+
+# Unpack message data and return a string representation of the message
+
+
+def decode_message(data):
+    command_type = data[0]
+    if command_type == 0x00:
+        return "joystick_disconnected"
+    elif command_type == 0x01:
+        return "joystick_connected"
+    elif command_type == 0x10:
+        return "auto_movement_off"
+    elif command_type == 0x11:
+        return "auto_movement_on"
+    elif command_type == 0x12:
+        return "auto_blink_off"
+    elif command_type == 0x13:
+        return "auto_blink_on"
+    elif command_type == 0x14:
+        return "auto_pupil_off"
+    elif command_type == 0x15:
+        return "auto_pupil_on"
+    elif command_type == 0x20:
+        x, y = struct.unpack('BB', data[1:3])
+        return f"joystick,{x/255:.2f},{y/255:.2f}"
+    elif command_type == 0x30:
+        position, = struct.unpack('B', data[1:2])
+        return f"left_eyelid,{position/255:.2f}"
+    elif command_type == 0x31:
+        position, = struct.unpack('B', data[1:2])
+        return f"right_eyelid,{position/255:.2f}"
+    elif command_type == 0x40:
+        return "blink_left_start"
+    elif command_type == 0x41:
+        return "blink_left_end"
+    elif command_type == 0x42:
+        return "blink_right_start"
+    elif command_type == 0x43:
+        return "blink_right_end"
+    elif command_type == 0x44:
+        return "blink_both_start"
+    elif command_type == 0x45:
+        return "blink_both_end"
+    else:
+        raise ValueError(f"Unknown command type: {command_type}")
 
 # Function to process UDP messages
 

@@ -4,6 +4,7 @@ from inputs import devices, get_gamepad
 import math
 import threading
 import atexit
+import struct
 
 # UDP settings
 UDP_IP = "10.0.1.151"  # Replace with the IP of your eye device
@@ -47,9 +48,56 @@ auto_blink = True
 auto_pupil = True
 
 
+def encode_message(command, data=None):
+    if command == "joystick_connected":
+        return b'\x01'
+    elif command == "joystick_disconnected":
+        return b'\x00'
+    elif command == "auto_movement_on":
+        return b'\x11'
+    elif command == "auto_movement_off":
+        return b'\x10'
+    elif command == "auto_blink_on":
+        return b'\x13'
+    elif command == "auto_blink_off":
+        return b'\x12'
+    elif command == "auto_pupil_on":
+        return b'\x15'
+    elif command == "auto_pupil_off":
+        return b'\x14'
+    elif command.startswith("joystick"):
+        _, x, y = command.split(',')
+        x_byte = int(float(x) * 255)
+        y_byte = int(float(y) * 255)
+        return b'\x20' + struct.pack('BB', x_byte, y_byte)
+    elif command.startswith("left_eyelid"):
+        _, position = command.split(',')
+        pos_byte = int(float(position) * 255)
+        return b'\x30' + struct.pack('B', pos_byte)
+    elif command.startswith("right_eyelid"):
+        _, position = command.split(',')
+        pos_byte = int(float(position) * 255)
+        return b'\x31' + struct.pack('B', pos_byte)
+    elif command == "blink_left_start":
+        return b'\x40'
+    elif command == "blink_left_end":
+        return b'\x41'
+    elif command == "blink_right_start":
+        return b'\x42'
+    elif command == "blink_right_end":
+        return b'\x43'
+    elif command == "blink_both_start":
+        return b'\x44'
+    elif command == "blink_both_end":
+        return b'\x45'
+    else:
+        raise ValueError(f"Unknown command: {command}")
+
+
 def send_message(message):
-    sock.sendto(message.encode(), (UDP_IP, UDP_PORT))
-    print(f"Sent: {message}")
+    encoded_message = encode_message(message)
+    sock.sendto(encoded_message, (UDP_IP, UDP_PORT))
+    print(f"Sent: {message} (encoded: {encoded_message.hex()})")
 
 
 def normalize_joystick(value):
