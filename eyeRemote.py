@@ -11,10 +11,10 @@ import queue
 import argparse
 
 
-class EyeController:
-    def __init__(self):
-        self.UDP_IP = "10.0.1.151"  # Replace with the IP of your eye device
-        self.UDP_PORT = 5005  # Make sure this matches the port in your eye script
+class EyeRemote:
+    def __init__(self, ip, port):
+        self.UDP_IP = ip  # Replace with the IP of your eye device
+        self.UDP_PORT = port  # Make sure this matches the port in your eye script
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         self.record_queue = queue.Queue()
@@ -459,15 +459,23 @@ class EyeController:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Controller Eye Control with recording and replay")
+        description="Eye Remote Control with recording and replay")
     parser.add_argument("-r", "--replay", help="Specify a file to replay")
     parser.add_argument("-l", "--loop", action="store_true",
                         help="Loop the replay")
     parser.add_argument("-f", "--freeze", action="store_true",
                         help="Freeze the final state after replay")
+    parser.add_argument(
+        "-i", "--ip", help="IP address of the eye device", default="127.0.0.1")
+    parser.add_argument(
+        "-p", "--port", help="Port of the eye device", type=int, default=5005)
     args = parser.parse_args()
 
-    controller = EyeController()
+    print("\033[92m")
+    print("Eye Remote Control")
+    print("Sending UDP to", args.ip, "port", args.port)
+    print("\033[0m")
+    controller = EyeRemote(args.ip, args.port)
 
     if args.replay:
         controller.replay_recording(args.replay, args.loop, args.freeze)
