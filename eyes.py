@@ -223,6 +223,7 @@ message_queue = Queue()
 # Control variables (replace GPIO inputs)
 auto_movement = True
 auto_blink = True
+auto_pupil = True
 joystick_x = 0
 joystick_y = 0
 blink_left = False
@@ -230,6 +231,7 @@ blink_right = False
 joystick_connected = False
 prev_auto_movement = True
 prev_auto_blink = True
+prev_auto_pupil = True
 
 # Thread for handling UDP messages
 
@@ -252,8 +254,8 @@ udp_thread.start()
 
 
 def process_udp_messages():
-    global auto_movement, auto_blink, joystick_x, joystick_y, blink_left, blink_right
-    global joystick_connected, prev_auto_movement, prev_auto_blink
+    global auto_movement, auto_blink, auto_pupil, joystick_x, joystick_y, blink_left, blink_right
+    global joystick_connected, prev_auto_movement, prev_auto_blink, prev_auto_pupil
     try:
         while True:
             message = message_queue.get_nowait()
@@ -261,12 +263,15 @@ def process_udp_messages():
                 joystick_connected = True
                 prev_auto_movement = auto_movement
                 prev_auto_blink = auto_blink
+                prev_auto_pupil = auto_pupil  # Store previous auto pupil state
                 auto_movement = False
                 auto_blink = False
+                auto_pupil = False  # Turn off auto pupil when joystick connected
             elif message == "joystick_disconnected":
                 joystick_connected = False
                 auto_movement = prev_auto_movement
                 auto_blink = prev_auto_blink
+                auto_pupil = prev_auto_pupil  # Restore previous auto pupil state
             elif message == "auto_movement_on":
                 if not joystick_connected:
                     auto_movement = True
@@ -283,6 +288,14 @@ def process_udp_messages():
                 if not joystick_connected:
                     auto_blink = False
                 prev_auto_blink = False
+            elif message == "auto_pupil_on":  # New message for auto pupil control
+                if not joystick_connected:
+                    auto_pupil = True
+                prev_auto_pupil = True
+            elif message == "auto_pupil_off":  # New message for auto pupil control
+                if not joystick_connected:
+                    auto_pupil = False
+                prev_auto_pupil = False
             elif message.startswith("joystick"):
                 if joystick_connected:
                     _, x, y = message.split(',')
@@ -743,7 +756,12 @@ while True:
             v = ((currentPupilScale * (PUPIL_SMOOTH - 1) + v) / PUPIL_SMOOTH)
         frame(v)
     else:
-        # Keep the fractal auto pupil scale as is
-        v = random.random()
-        split(currentPupilScale, v, 4.0, 1.0)
+        if auto_pupil:
+            # Keep the fractal auto pupil scale as is
+            v = random.random()
+            split(currentPupilScale, v, 4.0, 1.0)
+        else:
+            # Use a fixed pupil size when auto_pupil is off
+            v = 0.5  # You can adjust this value or make it controllable via UDP
+        frame(v)
     currentPupilScale = v

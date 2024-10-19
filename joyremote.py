@@ -3,6 +3,7 @@ import time
 from inputs import devices, get_gamepad
 import math
 import threading
+import atexit
 
 # UDP settings
 UDP_IP = "10.0.1.151"  # Replace with the IP of your eye device
@@ -30,6 +31,11 @@ controller_type = None
 
 # Joystick connection state
 joystick_connected = False
+
+# Auto features state
+auto_movement = True
+auto_blink = True
+auto_pupil = True
 
 
 def send_message(message):
@@ -64,17 +70,44 @@ def trigger_blink(eye):
 
 
 def connect_joystick():
-    global joystick_connected
+    global joystick_connected, auto_movement, auto_blink, auto_pupil
     send_message("joystick_connected")
     joystick_connected = True
+    auto_movement = False
+    auto_blink = False
+    auto_pupil = False
+    send_message("auto_movement_off")
+    send_message("auto_blink_off")
+    send_message("auto_pupil_off")
     print("Joystick connected")
 
 
 def disconnect_joystick():
-    global joystick_connected
+    global joystick_connected, auto_movement, auto_blink, auto_pupil
     send_message("joystick_disconnected")
     joystick_connected = False
+    auto_movement = True
+    auto_blink = True
+    auto_pupil = True
+    send_message("auto_movement_on")
+    send_message("auto_blink_on")
+    send_message("auto_pupil_on")
     print("Joystick disconnected")
+
+
+def toggle_auto_feature(feature):
+    global auto_movement, auto_blink, auto_pupil
+    if feature == "movement":
+        auto_movement = not auto_movement
+        send_message(f"auto_movement_{'on' if auto_movement else 'off'}")
+    elif feature == "blink":
+        auto_blink = not auto_blink
+        send_message(f"auto_blink_{'on' if auto_blink else 'off'}")
+    elif feature == "pupil":
+        auto_pupil = not auto_pupil
+        send_message(f"auto_pupil_{'on' if auto_pupil else 'off'}")
+    print(f"Auto {feature} {'enabled' if globals()
+          [f'auto_{feature}'] else 'disabled'}")
 
 
 def detect_controller():
@@ -135,6 +168,12 @@ def eye_controller():
         time.sleep(0.05)
 
 
+def cleanup():
+    print("\nDisconnecting joystick and exiting...")
+    disconnect_joystick()
+    sock.close()
+
+
 def main():
     global joystick_connected
     print("Controller Eye Control")
@@ -149,7 +188,13 @@ def main():
     print("Circle/B: Blink right eye")
     print("X/A: Blink both eyes")
     print("Press 'C' to connect/disconnect joystick")
+    print("Press 'M' to toggle auto movement")
+    print("Press 'B' to toggle auto blink")
+    print("Press 'P' to toggle auto pupil")
     print("Press Ctrl+C to exit")
+
+    # Register the cleanup function to be called on exit
+    atexit.register(cleanup)
 
     # Start the gamepad reader thread
     gamepad_thread = threading.Thread(target=gamepad_reader, daemon=True)
@@ -159,7 +204,7 @@ def main():
     eye_thread = threading.Thread(target=eye_controller, daemon=True)
     eye_thread.start()
 
-    # Main loop for handling joystick connection/disconnection
+    # Main loop for handling joystick connection/disconnection and auto feature toggling
     try:
         while True:
             command = input().lower()
@@ -168,9 +213,15 @@ def main():
                     disconnect_joystick()
                 else:
                     connect_joystick()
+            elif command == 'm':
+                toggle_auto_feature("movement")
+            elif command == 'b':
+                toggle_auto_feature("blink")
+            elif command == 'p':
+                toggle_auto_feature("pupil")
             time.sleep(0.1)
     except KeyboardInterrupt:
-        print("\nExiting...")
+        pass  # The cleanup function will handle the exit process
 
 
 if __name__ == "__main__":
