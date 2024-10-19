@@ -18,6 +18,8 @@ current_left_eyelid = 0
 current_right_eyelid = 0
 left_eyelid_position = 0.0
 right_eyelid_position = 0.0
+left_eye_closed = False
+right_eye_closed = False
 
 # Gamepad state
 gamepad_state = {
@@ -69,6 +71,26 @@ def set_eyelids(position):
         current_right_eyelid = eyelid_position
 
 
+def start_blink(eye):
+    global left_eye_closed, right_eye_closed
+    if eye in ['left', 'both']:
+        left_eye_closed = True
+        send_message("blink_left_start")
+    if eye in ['right', 'both']:
+        right_eye_closed = True
+        send_message("blink_right_start")
+
+
+def end_blink(eye):
+    global left_eye_closed, right_eye_closed
+    if eye in ['left', 'both']:
+        left_eye_closed = False
+        send_message("blink_left_end")
+    if eye in ['right', 'both']:
+        right_eye_closed = False
+        send_message("blink_right_end")
+
+
 def set_joystick(x, y):
     # Define the observed ranges
     x_min, x_max = 0, 0.00778198
@@ -109,7 +131,7 @@ def connect_joystick():
     auto_movement = False
     auto_blink = False
     auto_pupil = False
-    send_message("auto_movement_off")
+    # send_message("auto_movement_off")
     # send_message("auto_blink_off")
     # send_message("auto_pupil_off")
     print("Joystick connected")
@@ -177,12 +199,13 @@ def gamepad_reader():
 
 
 def eye_controller():
-    global joystick_connected
-    last_blink_time = 0
-    blink_cooldown = 0.2  # Reduced cooldown time for more responsive blinking
+    global joystick_connected, left_eye_closed, right_eye_closed
     last_x = 0
     last_y = 0
     last_eyelid_position = 0
+    last_left_blink_state = 0
+    last_right_blink_state = 0
+    last_both_blink_state = 0
 
     while True:
         if controller_type and joystick_connected:
@@ -199,23 +222,36 @@ def eye_controller():
             # Map right stick vertical axis to eyelid control
             eyelid_position = normalize_joystick(gamepad_state["RY"])
 
-            # Only update if position has changed
+            # Only update eyelids if position has changed
             if eyelid_position != last_eyelid_position:
                 set_eyelids(eyelid_position)
                 last_eyelid_position = eyelid_position
 
             # Handle blinking with buttons
-            current_time = time.time()
-            if current_time - last_blink_time > blink_cooldown:
-                if gamepad_state["BTN_WEST"] == 1:  # X on Xbox, Square on PS4
-                    trigger_blink("left")
-                    last_blink_time = current_time
-                elif gamepad_state["BTN_EAST"] == 1:  # B on Xbox, Circle on PS4
-                    trigger_blink("right")
-                    last_blink_time = current_time
-                elif gamepad_state["BTN_SOUTH"] == 1:  # A on Xbox, X on PS4
-                    trigger_blink("both")
-                    last_blink_time = current_time
+            left_blink_state = gamepad_state["BTN_WEST"]
+            right_blink_state = gamepad_state["BTN_EAST"]
+            both_blink_state = gamepad_state["BTN_SOUTH"]
+
+            if left_blink_state != last_left_blink_state:
+                if left_blink_state == 1:
+                    send_message("blink_left_start")
+                else:
+                    send_message("blink_left_end")
+                last_left_blink_state = left_blink_state
+
+            if right_blink_state != last_right_blink_state:
+                if right_blink_state == 1:
+                    send_message("blink_right_start")
+                else:
+                    send_message("blink_right_end")
+                last_right_blink_state = right_blink_state
+
+            if both_blink_state != last_both_blink_state:
+                if both_blink_state == 1:
+                    send_message("blink_both_start")
+                else:
+                    send_message("blink_both_end")
+                last_both_blink_state = both_blink_state
 
         # Add a small delay to prevent busy-waiting
         time.sleep(0.01)
@@ -238,9 +274,9 @@ def main():
 
     print("Use left stick to move eyes")
     print("Use right stick (vertical) to control eyelids")
-    print("Square/X: Blink left eye")
-    print("Circle/B: Blink right eye")
-    print("X/A: Blink both eyes")
+    print("Square/X: Hold to close left eye")
+    print("Circle/B: Hold to close right eye")
+    print("X/A: Hold to close both eyes")
     print("Press 'C' to connect/disconnect joystick")
     print("Press 'M' to toggle auto movement")
     print("Press 'B' to toggle auto blink")

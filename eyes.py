@@ -1,5 +1,8 @@
 #!/usr/bin/python
 
+# This script is heavily modified from the original eyes.py script
+# It enables UDP communication to control the eyes, replacing the GPIO inputs (KAvner)
+
 # This is a hasty port of the Teensy eyes code to Python...all kludgey with
 # an embarrassing number of globals in the frame() function and stuff.
 # Needed to get SOMETHING working, can focus on improvements next.
@@ -7,6 +10,7 @@
 
 import socket
 from queue import Queue, Empty
+
 import argparse
 import math
 import pi3d
@@ -17,8 +21,26 @@ from svg.path import Path, parse_path
 from xml.dom.minidom import parse
 from gfxutil import *
 
+
+# Control variables (replace GPIO inputs)
+auto_movement = True
+auto_blink = True
+auto_pupil = True
+joystick_x = 0
+joystick_y = 0
+blink_left = False
+blink_right = False
+blink_left_active = False
+blink_right_active = False
+joystick_connected = False
+prev_auto_movement = True
+prev_auto_blink = True
+prev_auto_pupil = True
+left_eyelid_position = 0.0  # 0.0 is fully open, 1.0 is fully closed
+right_eyelid_position = 0.0
+
 # INPUT CONFIG for eye motion ----------------------------------------------
-# ANALOG INPUTS REQUIRE SNAKE EYES BONNET
+# ANALOG INPUTS REQUIRE SNAKE EYES BONNET (Which is disabled in this version - replaced with UDP)
 
 JOYSTICK_X_IN = -1    # Analog input for eye horiz pos (-1 = auto)
 JOYSTICK_Y_IN = -1    # Analog input for eye vert position (")
@@ -220,24 +242,8 @@ sock.setblocking(0)  # Set socket to non-blocking mode
 # Create a queue for message passing between threads
 message_queue = Queue()
 
-# Control variables (replace GPIO inputs)
-auto_movement = True
-auto_blink = True
-auto_pupil = True
-joystick_x = 0
-joystick_y = 0
-blink_left = False
-blink_right = False
-joystick_connected = False
-prev_auto_movement = True
-prev_auto_blink = True
-prev_auto_pupil = True
-left_eyelid_position = 0.0  # 0.0 is fully open, 1.0 is fully closed
-right_eyelid_position = 0.0
 
 # Thread for handling UDP messages
-
-
 def udp_thread():
     while True:
         try:
@@ -259,6 +265,7 @@ def process_udp_messages():
     global auto_movement, auto_blink, auto_pupil, joystick_x, joystick_y, blink_left, blink_right
     global joystick_connected, prev_auto_movement, prev_auto_blink, prev_auto_pupil
     global left_eyelid_position, right_eyelid_position
+    global blink_left_active, blink_right_active
     try:
         while True:
             message = message_queue.get_nowait()
@@ -318,6 +325,20 @@ def process_udp_messages():
             elif message == "blink_both":
                 blink_left = True
                 blink_right = True
+            elif message == "blink_left_start":
+                blink_left_active = True
+            elif message == "blink_left_end":
+                blink_left_active = False
+            elif message == "blink_right_start":
+                blink_right_active = True
+            elif message == "blink_right_end":
+                blink_right_active = False
+            elif message == "blink_both_start":
+                blink_left_active = True
+                blink_right_active = True
+            elif message == "blink_both_end":
+                blink_left_active = False
+                blink_right_active = False
     except Empty:
         pass
 
@@ -400,6 +421,8 @@ trackingPosR = 0.3
 
 def frame(p):
     global blink_left, blink_right
+    global blink_left_active, blink_right_active
+    global left_eyelid_position, right_eyelid_position
     global startX, startY, destX, destY, curX, curY
     global startXR, startYR, destXR, destYR, curXR, curYR
     global moveDuration, holdDuration, startTime, isMoving
@@ -518,36 +541,15 @@ def frame(p):
 
     # Eyelid WIP
 
-    if auto_blink and (now - timeOfLastBlink) >= timeToNextBlink:
-        timeOfLastBlink = now
-        start_blink('both')
-        timeToNextBlink = random.uniform(3.0, 7.0)
-
-    if blinkStateLeft:
-        if (now - blinkStartTimeLeft) >= blinkDurationLeft:
-            blinkStateLeft += 1
-            if blinkStateLeft > 2:
-                blinkStateLeft = 0  # NOBLINK
-            else:
-                blinkDurationLeft *= 2.0
-                blinkStartTimeLeft = now
+    if blink_left_active:
+        left_eyelid_position = 1.0
     else:
-        if blink_left:
-            start_blink('left')
-            blink_left = False
+        left_eyelid_position = 0.0
 
-    if blinkStateRight:
-        if (now - blinkStartTimeRight) >= blinkDurationRight:
-            blinkStateRight += 1
-            if blinkStateRight > 2:
-                blinkStateRight = 0  # NOBLINK
-            else:
-                blinkDurationRight *= 2.0
-                blinkStartTimeRight = now
+    if blink_right_active:
+        right_eyelid_position = 1.0
     else:
-        if blink_right:
-            start_blink('right')
-            blink_right = False
+        right_eyelid_position = 0.0
 
     if BLINK_PIN is not None and BLINK_PIN.value == False:
         duration = random.uniform(0.035, 0.06)
@@ -570,35 +572,28 @@ def frame(p):
             n = max(0, min(1, n))
             trackingPosR = (trackingPosR * 3.0 + n) * 0.25
 
-    leftUpperLidWeight = trackingPos
-    leftLowerLidWeight = 1.0 - trackingPos
-    rightUpperLidWeight = trackingPos if not CRAZY_EYES else trackingPosR
-    rightLowerLidWeight = 1.0 - \
-        (trackingPos if not CRAZY_EYES else trackingPosR)
+    # Update eyelid positions based on blink state and tracking
+    if blink_left_active:
+        leftUpperLidWeight = 1.0
+        leftLowerLidWeight = 1.0
+    else:
+        leftUpperLidWeight = trackingPos
+        leftLowerLidWeight = 1.0 - trackingPos
 
-    # Apply blinking effect
-    if blinkStateLeft:
-        n = (now - blinkStartTimeLeft) / blinkDurationLeft
-        n = min(1.0, n)
-        if blinkStateLeft == 2:
-            n = 1.0 - n
-        leftUpperLidWeight += n * (1.0 - leftUpperLidWeight)
-        leftLowerLidWeight += n * (1.0 - leftLowerLidWeight)
+    if blink_right_active:
+        rightUpperLidWeight = 1.0
+        rightLowerLidWeight = 1.0
+    else:
+        rightUpperLidWeight = trackingPos if not CRAZY_EYES else trackingPosR
+        rightLowerLidWeight = 1.0 - \
+            (trackingPos if not CRAZY_EYES else trackingPosR)
 
-    if blinkStateRight:
-        n = (now - blinkStartTimeRight) / blinkDurationRight
-        n = min(1.0, n)
-        if blinkStateRight == 2:
-            n = 1.0 - n
-        rightUpperLidWeight += n * (1.0 - rightUpperLidWeight)
-        rightLowerLidWeight += n * (1.0 - rightLowerLidWeight)
-
-    # Use UDP-controlled eyelid positions if provided
-    if not auto_blink:
-        leftUpperLidWeight = max(leftUpperLidWeight, left_eyelid_position)
-        leftLowerLidWeight = max(leftLowerLidWeight, left_eyelid_position)
-        rightUpperLidWeight = max(rightUpperLidWeight, right_eyelid_position)
-        rightLowerLidWeight = max(rightLowerLidWeight, right_eyelid_position)
+    # Use UDP-controlled eyelid positions if auto_blink is off and eyes are not actively blinking
+    if not auto_blink and not (blink_left_active or blink_right_active):
+        leftUpperLidWeight = left_eyelid_position
+        leftLowerLidWeight = left_eyelid_position
+        rightUpperLidWeight = right_eyelid_position
+        rightLowerLidWeight = right_eyelid_position
 
     # Update eyelid meshes
     if (luRegen or (abs(leftUpperLidWeight - prevLeftUpperLidWeight) >=
