@@ -8,4 +8,4 @@ destination_path="kenneth@raspieyes:eyes.py"
 scp "$source_path" "$destination_path"
 
 # Connect via SSH and move the file using sudo
-ssh kenneth@raspieyes "sudo mv /home/kenneth/eyes.py /boot/Pi_Eyes/eyes.py && sudo reboot now"
+ssh kenneth@raspieyes "sudo mv /home/kenneth/eyes.py /boot/Pi_Eyes/eyes.py"
