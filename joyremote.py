@@ -70,21 +70,32 @@ def set_eyelids(position):
 
 
 def set_joystick(x, y):
-    global current_eye_x, current_eye_y
-    # Convert the -1 to 1 range to the -30 to 30 range expected by the eye script
-    # and apply additional scaling to make the movement more noticeable
-    eye_x = round(x * 30 * 5, 2)  # Apply scaling factor of 5
-    eye_y = round(y * -30 * 5, 2)  # Invert Y axis and apply scaling
+    # Define the observed ranges
+    x_min, x_max = 0, 0.00778198
+    y_min, y_max = 0, 0.00778190
 
-    # Ensure the values stay within the -30 to 30 range
-    eye_x = max(min(eye_x, 30), -30)
-    eye_y = max(min(eye_y, 30), -30)
+    # Calculate the middle points
+    x_mid = (x_min + x_max) / 2
+    y_mid = (y_min + y_max) / 2
+
+    # Map the joystick range to 0 to 1 range, with center at 0.5
+    eye_x = round((x - x_min) / (x_max - x_min), 2)
+    eye_y = round(1 - (y - y_min) / (y_max - y_min), 2)  # Invert Y axis
+
+    # Ensure the values stay within the 0 to 1 range
+    eye_x = max(min(eye_x, 1), 0)
+    eye_y = max(min(eye_y, 1), 0)
 
     # Only send message if the position has changed
+    global current_eye_x, current_eye_y
     if eye_x != current_eye_x or eye_y != current_eye_y:
         send_message(f"joystick,{eye_x},{eye_y}")
         current_eye_x = eye_x
         current_eye_y = eye_y
+
+    # Debug output
+    # print(f"Raw joystick: x={x}, y={y}")
+    # print(f"Eye position: x={eye_x}, y={eye_y}")
 
 
 def trigger_blink(eye):
