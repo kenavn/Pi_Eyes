@@ -28,6 +28,9 @@ gamepad_state = {
 # Controller type
 controller_type = None
 
+# Joystick connection state
+joystick_connected = False
+
 
 def send_message(message):
     sock.sendto(message.encode(), (UDP_IP, UDP_PORT))
@@ -60,6 +63,20 @@ def trigger_blink(eye):
     send_message(f"blink_{eye}")
 
 
+def connect_joystick():
+    global joystick_connected
+    send_message("joystick_connected")
+    joystick_connected = True
+    print("Joystick connected")
+
+
+def disconnect_joystick():
+    global joystick_connected
+    send_message("joystick_disconnected")
+    joystick_connected = False
+    print("Joystick disconnected")
+
+
 def detect_controller():
     global controller_type
     for device in devices:
@@ -90,11 +107,12 @@ def gamepad_reader():
 
 
 def eye_controller():
+    global joystick_connected
     last_blink_time = 0
     blink_cooldown = 0.5  # Cooldown time between blinks in seconds
 
     while True:
-        if controller_type:
+        if controller_type and joystick_connected:
             # Map left stick to eye movement
             x = normalize_joystick(gamepad_state["LX"])
             y = normalize_joystick(gamepad_state["LY"])
@@ -118,6 +136,7 @@ def eye_controller():
 
 
 def main():
+    global joystick_connected
     print("Controller Eye Control")
     print("Detecting controller...")
     detect_controller()
@@ -129,15 +148,27 @@ def main():
     print("Square/X: Blink left eye")
     print("Circle/B: Blink right eye")
     print("X/A: Blink both eyes")
+    print("Press 'C' to connect/disconnect joystick")
     print("Press Ctrl+C to exit")
 
     # Start the gamepad reader thread
     gamepad_thread = threading.Thread(target=gamepad_reader, daemon=True)
     gamepad_thread.start()
 
-    # Start the eye controller
+    # Start the eye controller thread
+    eye_thread = threading.Thread(target=eye_controller, daemon=True)
+    eye_thread.start()
+
+    # Main loop for handling joystick connection/disconnection
     try:
-        eye_controller()
+        while True:
+            command = input().lower()
+            if command == 'c':
+                if joystick_connected:
+                    disconnect_joystick()
+                else:
+                    connect_joystick()
+            time.sleep(0.1)
     except KeyboardInterrupt:
         print("\nExiting...")
 

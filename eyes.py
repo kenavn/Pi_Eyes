@@ -227,6 +227,9 @@ joystick_x = 0
 joystick_y = 0
 blink_left = False
 blink_right = False
+joystick_connected = False
+prev_auto_movement = True
+prev_auto_blink = True
 
 # Thread for handling UDP messages
 
@@ -250,21 +253,41 @@ udp_thread.start()
 
 def process_udp_messages():
     global auto_movement, auto_blink, joystick_x, joystick_y, blink_left, blink_right
+    global joystick_connected, prev_auto_movement, prev_auto_blink
     try:
         while True:
             message = message_queue.get_nowait()
-            if message == "auto_movement_on":
-                auto_movement = True
-            elif message == "auto_movement_off":
+            if message == "joystick_connected":
+                joystick_connected = True
+                prev_auto_movement = auto_movement
+                prev_auto_blink = auto_blink
                 auto_movement = False
-            elif message == "auto_blink_on":
-                auto_blink = True
-            elif message == "auto_blink_off":
                 auto_blink = False
+            elif message == "joystick_disconnected":
+                joystick_connected = False
+                auto_movement = prev_auto_movement
+                auto_blink = prev_auto_blink
+            elif message == "auto_movement_on":
+                if not joystick_connected:
+                    auto_movement = True
+                prev_auto_movement = True
+            elif message == "auto_movement_off":
+                if not joystick_connected:
+                    auto_movement = False
+                prev_auto_movement = False
+            elif message == "auto_blink_on":
+                if not joystick_connected:
+                    auto_blink = True
+                prev_auto_blink = True
+            elif message == "auto_blink_off":
+                if not joystick_connected:
+                    auto_blink = False
+                prev_auto_blink = False
             elif message.startswith("joystick"):
-                _, x, y = message.split(',')
-                joystick_x = float(x)
-                joystick_y = float(y)
+                if joystick_connected:
+                    _, x, y = message.split(',')
+                    joystick_x = float(x)
+                    joystick_y = float(y)
             elif message == "blink_left":
                 blink_left = True
             elif message == "blink_right":
@@ -389,7 +412,7 @@ def frame(p):
 
     frames += 1
 
-    if not auto_movement:
+    if (not auto_movement) or joystick_connected:
         # Eye position from UDP input
         curX = -30.0 + joystick_x * 60.0
         curY = -30.0 + joystick_y * 60.0
