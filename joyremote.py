@@ -12,6 +12,13 @@ UDP_PORT = 5005  # Make sure this matches the port in your eye script
 # Create a UDP socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+current_eye_x = 0
+current_eye_y = 0
+current_left_eyelid = 0
+current_right_eyelid = 0
+left_eyelid_position = 0.0
+right_eyelid_position = 0.0
+
 # Gamepad state
 gamepad_state = {
     "LX": 0,
@@ -47,22 +54,37 @@ def normalize_joystick(value):
     return value / 32768.0  # This converts the raw value to a range of -1 to 1
 
 
+def set_eyelids(position):
+    global current_left_eyelid, current_right_eyelid
+    # Convert the -1 to 1 range to the 0 to 1 range expected by the eye script
+    eyelid_position = round((position + 1) / 2, 2)
+
+    # Only send messages if the positions have changed
+    if eyelid_position != current_left_eyelid:
+        send_message(f"left_eyelid,{eyelid_position}")
+        current_left_eyelid = eyelid_position
+
+    if eyelid_position != current_right_eyelid:
+        send_message(f"right_eyelid,{eyelid_position}")
+        current_right_eyelid = eyelid_position
+
+
 def set_joystick(x, y):
+    global current_eye_x, current_eye_y
     # Convert the -1 to 1 range to the -30 to 30 range expected by the eye script
     # and apply additional scaling to make the movement more noticeable
-    eye_x = round(x * 30, 2)
-    eye_y = round(y * -30, 2)  # Invert Y axis to match eye movement
-
-    # Apply a scaling factor to make the values larger
-    scaling_factor = 5  # Adjust this value as needed
-    eye_x *= scaling_factor
-    eye_y *= scaling_factor
+    eye_x = round(x * 30 * 5, 2)  # Apply scaling factor of 5
+    eye_y = round(y * -30 * 5, 2)  # Invert Y axis and apply scaling
 
     # Ensure the values stay within the -30 to 30 range
     eye_x = max(min(eye_x, 30), -30)
     eye_y = max(min(eye_y, 30), -30)
 
-    send_message(f"joystick,{eye_x},{eye_y}")
+    # Only send message if the position has changed
+    if eye_x != current_eye_x or eye_y != current_eye_y:
+        send_message(f"joystick,{eye_x},{eye_y}")
+        current_eye_x = eye_x
+        current_eye_y = eye_y
 
 
 def trigger_blink(eye):
@@ -137,21 +159,41 @@ def gamepad_reader():
                 gamepad_state["LX"] = event.state
             elif event.code == "ABS_Y":
                 gamepad_state["LY"] = event.state
+            elif event.code == "ABS_RX":
+                gamepad_state["RX"] = event.state
+            elif event.code == "ABS_RY":
+                gamepad_state["RY"] = event.state
 
 
 def eye_controller():
     global joystick_connected
     last_blink_time = 0
     blink_cooldown = 0.5  # Cooldown time between blinks in seconds
+    last_x = 0
+    last_y = 0
+    last_eyelid_position = 0
 
     while True:
         if controller_type and joystick_connected:
             # Map left stick to eye movement
             x = normalize_joystick(gamepad_state["LX"])
             y = normalize_joystick(gamepad_state["LY"])
-            set_joystick(x, y)
 
-            # Use buttons for blinking
+            # Only update if position has changed
+            if x != last_x or y != last_y:
+                set_joystick(x, y)
+                last_x = x
+                last_y = y
+
+            # Map right stick vertical axis to eyelid control
+            eyelid_position = normalize_joystick(gamepad_state["RY"])
+
+            # Only update if position has changed
+            if eyelid_position != last_eyelid_position:
+                set_eyelids(eyelid_position)
+                last_eyelid_position = eyelid_position
+
+            # Use buttons for blinking (keep existing blink logic)
             current_time = time.time()
             if current_time - last_blink_time > blink_cooldown:
                 if gamepad_state["BTN_WEST"] == 1:  # X on Xbox, Square on PS4
@@ -164,8 +206,8 @@ def eye_controller():
                     trigger_blink("both")
                     last_blink_time = current_time
 
-        # Add a small delay to prevent overwhelming the network
-        time.sleep(0.05)
+        # Add a small delay to prevent busy-waiting
+        time.sleep(0.01)
 
 
 def cleanup():
@@ -184,6 +226,7 @@ def main():
         return
 
     print("Use left stick to move eyes")
+    print("Use right stick (vertical) to control eyelids")
     print("Square/X: Blink left eye")
     print("Circle/B: Blink right eye")
     print("X/A: Blink both eyes")

@@ -232,6 +232,8 @@ joystick_connected = False
 prev_auto_movement = True
 prev_auto_blink = True
 prev_auto_pupil = True
+left_eyelid_position = 0.0  # 0.0 is fully open, 1.0 is fully closed
+right_eyelid_position = 0.0
 
 # Thread for handling UDP messages
 
@@ -256,6 +258,7 @@ udp_thread.start()
 def process_udp_messages():
     global auto_movement, auto_blink, auto_pupil, joystick_x, joystick_y, blink_left, blink_right
     global joystick_connected, prev_auto_movement, prev_auto_blink, prev_auto_pupil
+    global left_eyelid_position, right_eyelid_position
     try:
         while True:
             message = message_queue.get_nowait()
@@ -296,6 +299,13 @@ def process_udp_messages():
                 if not joystick_connected:
                     auto_pupil = False
                 prev_auto_pupil = False
+            # Handle eyelid position messages
+            elif message.startswith("left_eyelid"):
+                _, position = message.split(',')
+                left_eyelid_position = float(position)
+            elif message.startswith("right_eyelid"):
+                _, position = message.split(',')
+                right_eyelid_position = float(position)
             elif message.startswith("joystick"):
                 if joystick_connected:
                     _, x, y = message.split(',')
@@ -583,31 +593,38 @@ def frame(p):
                 n = 1.0
             trackingPosR = (trackingPosR * 3.0 + n) * 0.25
 
-    if blinkStateLeft:
-        n = (now - blinkStartTimeLeft) / blinkDurationLeft
-        if n > 1.0:
-            n = 1.0
-        if blinkStateLeft == 2:
-            n = 1.0 - n
-    else:
-        n = 0.0
-    newLeftUpperLidWeight = trackingPos + (n * (1.0 - trackingPos))
-    newLeftLowerLidWeight = (1.0 - trackingPos) + (n * trackingPos)
+    if auto_blink:
+        if blinkStateLeft:
+            n = (now - blinkStartTimeLeft) / blinkDurationLeft
+            if n > 1.0:
+                n = 1.0
+            if blinkStateLeft == 2:
+                n = 1.0 - n
+        else:
+            n = 0.0
+        newLeftUpperLidWeight = trackingPos + (n * (1.0 - trackingPos))
+        newLeftLowerLidWeight = (1.0 - trackingPos) + (n * trackingPos)
 
-    if blinkStateRight:
-        n = (now - blinkStartTimeRight) / blinkDurationRight
-        if n > 1.0:
-            n = 1.0
-        if blinkStateRight == 2:
-            n = 1.0 - n
+        if blinkStateRight:
+            n = (now - blinkStartTimeRight) / blinkDurationRight
+            if n > 1.0:
+                n = 1.0
+            if blinkStateRight == 2:
+                n = 1.0 - n
+        else:
+            n = 0.0
+        if CRAZY_EYES:
+            newRightUpperLidWeight = trackingPosR + (n * (1.0 - trackingPosR))
+            newRightLowerLidWeight = (1.0 - trackingPosR) + (n * trackingPosR)
+        else:
+            newRightUpperLidWeight = trackingPos + (n * (1.0 - trackingPos))
+            newRightLowerLidWeight = (1.0 - trackingPos) + (n * trackingPos)
     else:
-        n = 0.0
-    if CRAZY_EYES:
-        newRightUpperLidWeight = trackingPosR + (n * (1.0 - trackingPosR))
-        newRightLowerLidWeight = (1.0 - trackingPosR) + (n * trackingPosR)
-    else:
-        newRightUpperLidWeight = trackingPos + (n * (1.0 - trackingPos))
-        newRightLowerLidWeight = (1.0 - trackingPos) + (n * trackingPos)
+        # Use UDP-controlled eyelid positions
+        newLeftUpperLidWeight = left_eyelid_position
+        newLeftLowerLidWeight = left_eyelid_position
+        newRightUpperLidWeight = right_eyelid_position
+        newRightLowerLidWeight = right_eyelid_position
 
     if (luRegen or (abs(newLeftUpperLidWeight - prevLeftUpperLidWeight) >=
                     upperLidRegenThreshold)):
