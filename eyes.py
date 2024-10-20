@@ -11,6 +11,8 @@
 import socket
 import struct
 from queue import Queue, Empty
+import platform
+import os
 
 import argparse
 import math
@@ -79,7 +81,22 @@ lowerLidEdgePts = get_points(dom, "lowerLidEdge", 33, False, False)
 
 # Set up display and initialize pi3d ---------------------------------------
 
-DISPLAY = pi3d.Display.create(samples=4)
+def is_raspberry_pi():
+    try:
+        with open('/sys/firmware/devicetree/base/model', 'r') as m:
+            if 'raspberry pi' in m.read().lower():
+                return True
+    except Exception:
+        pass
+    return platform.machine().startswith('arm') or platform.machine().startswith('aarch')
+
+# This will initialize the display with fullscreen 4x antialiasing on a Raspberry Pi
+# and windowed with no antialiasing on other platforms.
+if is_raspberry_pi():
+    DISPLAY = pi3d.Display.create(samples=4)
+else:
+    DISPLAY = pi3d.Display.create(x=100, y=100, w=800, h=600)
+
 DISPLAY.set_background(0, 0, 0, 1)  # r,g,b,alpha
 
 # eyeRadius is the size, in pixels, at which the whole eye will be rendered
