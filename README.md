@@ -20,6 +20,9 @@ _Creds to Adafruit and Paint Your Dragon for the original work._
 
 2. Replace the `/boot/Pi_Eyes/eyes.py` with `eyes.py` from this repo.
 3. Reboot the pi
+4. (Optional) You may try to up the priority of the processes involved to reduce lag. Do this by modifying the startup script by doing the following: 1. `sudo nano /etc/rc.local` and go all the way down 2. change the commands on the bottom to: `nice -n -20 /boot/Pi_Eyes/fbx2 -i &
+cd /boot/Pi_Eyes; nice -n -20 xinit /usr/bin/python3 eyes.py --radius 240 :0 &
+exit 0`. Note that the radius parameter should read the same as the old command you replaced.
 
 ### Install the remote control
 
