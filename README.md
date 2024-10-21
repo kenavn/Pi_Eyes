@@ -37,3 +37,7 @@ Press the SHARE button on controller to start/stop recording.
 ### How to playback
 
 `python eyeRemote.py -i 192.168.1.2 -p 5005 -r recording.csv`
+
+### HW Documentation from Adafruit
+
+https://learn.adafruit.com/animated-snake-eyes-bonnet-for-raspberry-pi/
