@@ -24,6 +24,27 @@ _Creds to Adafruit and Paint Your Dragon for the original work._
 cd /boot/Pi_Eyes; nice -n -20 xinit /usr/bin/python3 eyes.py --radius 240 :0 &
 exit 0`. Note that the radius parameter should read the same as the old command you replaced.
 
+### Install the mouth controller (optional)
+
+The mouth controller runs the mouth with a servo motor (mouth.py). It has a dependency installed on the raspi image, but
+it needs to be enabled (pigpiod).
+
+Run the following commands on the Raspberry Pi to enable the pigpiod service:
+`sudo systemctl start pigpiod`
+`sudo systemctl enable pigpiod`
+
+After enabling this service, we also need to add the mouth.py program to the system boot:
+
+1. Copy the `mouth.py` file into `/boot/Pi_Eyes/` folder on the Raspberry Pi
+2. Copy the `mouth.service` file into `/etc/systemd/system/` folder as well (you will need sudo)
+3. `sudo chmod +x /boot/Pi_Eyes/mouth.py`
+4. `sudo systemctl daemon-reload`
+5. `sudo systemctl enable mouth.service`
+6. `sudo systemctl start mouth.service`
+
+You can check the status of the new service by running:
+`sudo systemctl status mouth.service`
+
 ### Install the remote control
 
 1. Make sure you have Python installed on your remote machine
