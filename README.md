@@ -78,6 +78,10 @@ Press the SHARE button on controller to start/stop recording.
 
 `python eyeRemote.py -i 192.168.1.2 -p 5005 -r recording.csv`
 
+### How to control through MQTT
+
+See the separate file README-MQTT.md
+
 ### HW Documentation from Adafruit
 
 https://learn.adafruit.com/animated-snake-eyes-bonnet-for-raspberry-pi/
