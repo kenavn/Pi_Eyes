@@ -22,6 +22,9 @@ class EyeController:
         self.left_eye_closed = False
         self.right_eye_closed = False
 
+        # Add joystick enable flag
+        self.joystick_enabled = True  # Add this line
+
         # Gamepad state tracking
         self.gamepad_state = {
             "ABS_X": 0,  # Left stick X
@@ -158,84 +161,91 @@ class EyeController:
         print("Eye controller thread started")
         while self.running:
             try:
-                # Get joystick values
-                x = self.gamepad_state.get("ABS_X", 0)
-                y = self.gamepad_state.get("ABS_Y", 0)
+                if self.joystick_enabled:
+                    # Get joystick values
+                    x = self.gamepad_state.get("ABS_X", 0)
+                    y = self.gamepad_state.get("ABS_Y", 0)
 
-                # Map from observed range (0-255) to -1 to 1
-                x = (x - 128) / 128.0  # Maps 0->-1, 128->0, 255->1
-                y = (y - 128) / 128.0
+                    # Map from observed range (0-255) to -1 to 1
+                    x = (x - 128) / 128.0  # Maps 0->-1, 128->0, 255->1
+                    y = (y - 128) / 128.0
 
-                # Add deadzone
-                x = x if abs(x) > 0.1 else 0
-                y = y if abs(y) > 0.1 else 0
+                    # Add deadzone
+                    x = x if abs(x) > 0.1 else 0
+                    y = y if abs(y) > 0.1 else 0
 
-                # Map to 0-1 range
-                eye_x = (x + 1) / 2
-                eye_y = (-y + 1) / 2  # Invert Y axis
+                    # Map to 0-1 range
+                    eye_x = (x + 1) / 2
+                    eye_y = (-y + 1) / 2  # Invert Y axis
 
-                # Send eye position if changed significantly
-                if (
-                    abs(eye_x - self.current_eye_x) > 0.01
-                    or abs(eye_y - self.current_eye_y) > 0.01
-                ):
-                    self.current_eye_x = eye_x
-                    self.current_eye_y = eye_y
-                    self.send_message(f"joystick,{eye_x:.2f},{eye_y:.2f}")
+                    # Send eye position if changed significantly
+                    if (
+                        abs(eye_x - self.current_eye_x) > 0.01
+                        or abs(eye_y - self.current_eye_y) > 0.01
+                    ):
+                        self.current_eye_x = eye_x
+                        self.current_eye_y = eye_y
+                        self.send_message(f"joystick,{eye_x:.2f},{eye_y:.2f}")
 
-                # Handle eyelid control
-                ry = self.gamepad_state.get("ABS_RY", 0)
-                eyelid_pos = (
-                    (-ry / 128.0 + 1) / 2
-                    if abs(ry - 128) > 12
-                    else self.current_left_eyelid
-                )
+                    # Handle eyelid control
+                    ry = self.gamepad_state.get("ABS_RY", 0)
+                    eyelid_pos = (
+                        (-ry / 128.0 + 1) / 2
+                        if abs(ry - 128) > 12
+                        else self.current_left_eyelid
+                    )
 
-                if abs(eyelid_pos - self.current_left_eyelid) > 0.01:
-                    self.current_left_eyelid = eyelid_pos
-                    self.current_right_eyelid = eyelid_pos
-                    self.send_message(f"left_eyelid,{eyelid_pos:.2f}")
-                    self.send_message(f"right_eyelid,{eyelid_pos:.2f}")
+                    if abs(eyelid_pos - self.current_left_eyelid) > 0.01:
+                        self.current_left_eyelid = eyelid_pos
+                        self.current_right_eyelid = eyelid_pos
+                        self.send_message(f"left_eyelid,{eyelid_pos:.2f}")
+                        self.send_message(f"right_eyelid,{eyelid_pos:.2f}")
 
-                # Handle button state changes
-                # Left eye (Square/X button on Xbox)
-                if (
-                    self.gamepad_state["BTN_WEST"]
-                    != self.prev_button_states["BTN_WEST"]
-                ):
-                    if self.gamepad_state["BTN_WEST"] == 1:
-                        self.send_message("blink_left_start")
-                    else:
-                        self.send_message("blink_left_end")
-                    self.prev_button_states["BTN_WEST"] = self.gamepad_state["BTN_WEST"]
+                    # Handle button state changes
+                    # Left eye (Square/X button on Xbox)
+                    if (
+                        self.gamepad_state["BTN_WEST"]
+                        != self.prev_button_states["BTN_WEST"]
+                    ):
+                        if self.gamepad_state["BTN_WEST"] == 1:
+                            self.send_message("blink_left_start")
+                        else:
+                            self.send_message("blink_left_end")
+                        self.prev_button_states["BTN_WEST"] = self.gamepad_state[
+                            "BTN_WEST"
+                        ]
 
-                # Right eye (Circle/B button)
-                if (
-                    self.gamepad_state["BTN_EAST"]
-                    != self.prev_button_states["BTN_EAST"]
-                ):
-                    if self.gamepad_state["BTN_EAST"] == 1:
-                        self.send_message("blink_right_start")
-                    else:
-                        self.send_message("blink_right_end")
-                    self.prev_button_states["BTN_EAST"] = self.gamepad_state["BTN_EAST"]
+                    # Right eye (Circle/B button)
+                    if (
+                        self.gamepad_state["BTN_EAST"]
+                        != self.prev_button_states["BTN_EAST"]
+                    ):
+                        if self.gamepad_state["BTN_EAST"] == 1:
+                            self.send_message("blink_right_start")
+                        else:
+                            self.send_message("blink_right_end")
+                        self.prev_button_states["BTN_EAST"] = self.gamepad_state[
+                            "BTN_EAST"
+                        ]
 
-                # Both eyes (X/A button)
-                if (
-                    self.gamepad_state["BTN_SOUTH"]
-                    != self.prev_button_states["BTN_SOUTH"]
-                ):
-                    if self.gamepad_state["BTN_SOUTH"] == 1:
-                        self.send_message("blink_both_start")
-                    else:
-                        self.send_message("blink_both_end")
-                    self.prev_button_states["BTN_SOUTH"] = self.gamepad_state[
-                        "BTN_SOUTH"
-                    ]
+                    # Both eyes (X/A button)
+                    if (
+                        self.gamepad_state["BTN_SOUTH"]
+                        != self.prev_button_states["BTN_SOUTH"]
+                    ):
+                        if self.gamepad_state["BTN_SOUTH"] == 1:
+                            self.send_message("blink_both_start")
+                        else:
+                            self.send_message("blink_both_end")
+                        self.prev_button_states["BTN_SOUTH"] = self.gamepad_state[
+                            "BTN_SOUTH"
+                        ]
 
-                # Record state if recording is active
-                if self.is_recording:
-                    self.record_state()
+                    # Record state if recording is active
+                    if self.is_recording:
+                        self.record_state()
+
+                    pass
 
                 time.sleep(0.016)  # ~60Hz update rate
 
@@ -339,6 +349,69 @@ class EyeController:
             print(f"Sent UDP: {message} (encoded: {encoded_message.hex()})")
         except Exception as e:
             print(f"Error sending message: {e}")
+
+    def disable_joystick(self):
+        """Disable joystick input"""
+        self.joystick_enabled = False
+        print("Joystick control disabled")
+
+    def enable_joystick(self):
+        """Enable joystick input"""
+        self.joystick_enabled = True
+        print("Joystick control enabled")
+
+    def set_position(self, x, y):
+        """Set eye position directly (for playback)"""
+        if not self.joystick_enabled:
+            print(f"Setting eye position: X={x:.3f}, Y={y:.3f}")
+            self.current_eye_x = x
+            self.current_eye_y = y
+            command = f"joystick,{x:.2f},{y:.2f}"
+            self.send_message(command)
+
+    def blink_left(self, state):
+        """Control left eye blink"""
+        if not self.joystick_enabled:
+            if state != self.left_eye_closed:
+                command = "blink_left_start" if state else "blink_left_end"
+                print(f"Setting left blink: {command}")
+                self.send_message(command)
+                self.left_eye_closed = state
+
+    def blink_right(self, state):
+        """Control right eye blink"""
+        if not self.joystick_enabled:
+            if state != self.right_eye_closed:
+                command = "blink_right_start" if state else "blink_right_end"
+                print(f"Setting right blink: {command}")
+                self.send_message(command)
+                self.right_eye_closed = state
+
+    def blink_both(self, state):
+        """Control both eyes blink"""
+        if not self.joystick_enabled:
+            if state != (self.left_eye_closed and self.right_eye_closed):
+                command = "blink_both_start" if state else "blink_both_end"
+                print(f"Setting both blinks: {command}")
+                self.send_message(command)
+                self.left_eye_closed = state
+                self.right_eye_closed = state
+
+    def set_blink_state(self, left=False, right=False, both=False):
+        """Set blink state directly (for playback)"""
+        if not self.joystick_enabled:
+            if both:
+                self.send_message("blink_both_start" if both else "blink_both_end")
+            else:
+                if left != self.left_eye_closed:
+                    self.send_message("blink_left_start" if left else "blink_left_end")
+                if right != self.right_eye_closed:
+                    self.send_message(
+                        "blink_right_start" if right else "blink_right_end"
+                    )
+
+            self.left_eye_closed = left or both
+            self.right_eye_closed = right or both
 
     def cleanup(self):
         """Clean up resources and threads"""

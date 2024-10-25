@@ -136,9 +136,15 @@ class TimelineCanvas(tk.Canvas):
         self.delete("eye_data")
 
         if not self.eye_data:
+            print("No eye data to draw")
             return
 
+        print(f"Drawing {len(self.eye_data)} points")
+
         width = self.winfo_width()
+        if width == 0:
+            width = 800  # Default width if not yet set
+
         track_height = self.track_heights["eyes"]
         y_base = self.track_positions["eyes"]
 
@@ -148,30 +154,29 @@ class TimelineCanvas(tk.Canvas):
         blink_points = []
 
         for time_ms, x, y, left_blink, right_blink, both_eyes in self.eye_data:
+            # Calculate x position on timeline
             canvas_x = (
                 (time_ms / self.duration_ms) * width if self.duration_ms > 0 else 0
             )
 
-            # Eye X position (green)
+            # Calculate y positions
             y_x = y_base + (1 - x) * track_height
-            x_points.extend([canvas_x, y_x])
-
-            # Eye Y position (amber)
             y_y = y_base + (1 - y) * track_height
+
+            # Add points
+            x_points.extend([canvas_x, y_x])
             y_points.extend([canvas_x, y_y])
 
-            # Blink state (purple)
-            # Check both_eyes first, then individual blinks
+            # Handle blinks
             if both_eyes:
-                blink_y = y_base  # Both eyes closed
+                blink_y = y_base
             elif left_blink or right_blink:
-                blink_y = y_base + (track_height * 0.25)  # Individual blink
+                blink_y = y_base + (track_height * 0.25)
             else:
-                blink_y = y_base + track_height  # Eyes open
-
+                blink_y = y_base + track_height
             blink_points.extend([canvas_x, blink_y])
 
-        # Draw lines
+        # Draw the lines
         if len(x_points) > 2:
             self.create_line(
                 *x_points, fill=self.colors["eye_x"], width=2, tags="eye_data"
@@ -182,6 +187,7 @@ class TimelineCanvas(tk.Canvas):
             self.create_line(
                 *blink_points, fill=self.colors["blink"], width=2, tags="eye_data"
             )
+            print("Drew all graph lines")
 
     def draw_mouth_data(self):
         """Draw mouth movement visualization"""
@@ -207,13 +213,19 @@ class TimelineCanvas(tk.Canvas):
 
     def add_eye_data_point(self, time_ms, x, y, left_blink, right_blink, both_eyes):
         """Add eye movement data point and update visualization"""
-        print(f"Timeline: Adding eye data - Time: {time_ms}ms, X: {x:.3f}, Y: {y:.3f}")
+        print(f"Timeline: Adding point - Time: {time_ms}ms, X: {x:.3f}, Y: {y:.3f}")
+
+        # Store the data point
         self.eye_data.append([time_ms, x, y, left_blink, right_blink, both_eyes])
-        self.draw_eye_data()
 
         # Extend timeline if needed
         if time_ms > self.duration_ms:
             self.duration_ms = max(time_ms + 5000, 10000)
+            print(f"Extended timeline duration to {self.duration_ms}ms")
+
+        # Draw immediately
+        self.draw_eye_data()
+        print(f"Drew graph with {len(self.eye_data)} points")
 
     def add_mouth_data_point(self, time_ms, value):
         """Add mouth movement data point and update visualization"""

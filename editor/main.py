@@ -151,7 +151,9 @@ class AnimationControlGUI:
     def update_record_controls(self):
         """Update controls based on record on playback setting"""
         if self.record_on_play_var.get():
-            self.play_record_button.config(text="⏺")
+            self.play_record_button.config(
+                text="▶/⏺"
+            )  # Combined play and record symbols
             self.eye_radio.config(state="normal")
             self.mouth_radio.config(state="normal")
         else:
@@ -178,32 +180,41 @@ class AnimationControlGUI:
     def play_or_record(self):
         """Handle play or record based on current mode"""
         if self.record_on_play_var.get():
-            # Start recording mode
+            # Record mode [existing recording code remains the same]
             target = self.record_target_var.get()
             if target == "eyes":
+                print("Starting new eye recording")
                 self.timeline.clear_eye_data()
             else:
                 self.timeline.clear_mouth_data()
 
-            # Start a timer for the timeline if no audio
-            if not self.audio_player.is_loaded():
-                self.recording_start_time = datetime.now()
-            else:
-                self.audio_player.play()
-
+            self.recording_start_time = datetime.now()
             self.is_playing = True
             self.is_recording = True
-            self.status_var.set(f"Recording {target}...")
+            print("Recording started")
+            self.status_var.set(f"Recording {target}")
         else:
-            # Normal playback - requires audio
-            if not self.audio_player.is_loaded():
-                messagebox.showwarning(
-                    "Warning", "Please load an audio file for playback"
-                )
+            # Playback mode
+            has_recording = len(self.timeline.eye_data) > 0
+            print(f"Attempting playback with {len(self.timeline.eye_data)} frames")
+
+            if not has_recording and not self.audio_player.is_loaded():
+                messagebox.showwarning("Warning", "No recording or audio to play")
                 return
-            self.audio_player.play()
+
+            # Start playback
+            self.recording_start_time = datetime.now()
             self.is_playing = True
-            self.status_var.set("Playing...")
+            self.is_recording = False
+
+            # Disable joystick during playback
+            self.eye_controller.joystick_enabled = False
+            print("Disabled joystick for playback")
+
+            if self.audio_player.is_loaded():
+                self.audio_player.play()
+
+            self.status_var.set("Playing back recording")
 
     def pause(self):
         if self.audio_player.is_loaded():
@@ -217,6 +228,8 @@ class AnimationControlGUI:
             self.audio_player.stop()
         self.is_playing = False
         self.is_recording = False
+        # Re-enable joystick when stopping
+        self.eye_controller.joystick_enabled = True
         self.timeline.update_time_marker(0)
         self.status_var.set("Stopped")
 
@@ -231,20 +244,20 @@ class AnimationControlGUI:
                 current_time = int(
                     (datetime.now() - self.recording_start_time).total_seconds() * 1000
                 )
+            else:  # Playback without audio
+                current_time = int(
+                    (datetime.now() - self.recording_start_time).total_seconds() * 1000
+                )
 
+            # Update timeline marker
             self.timeline.update_time_marker(current_time)
 
             if self.is_recording and self.record_target_var.get() == "eyes":
-                # Get both-eye blink state
-                both_eyes = self.eye_controller.prev_button_states["BTN_SOUTH"] == 1
-
+                # Recording mode [existing recording code remains the same]
                 print(
-                    f"Recording eye data at {current_time}ms:",
+                    f"Recording frame at {current_time}ms:",
                     f"X: {self.eye_controller.current_eye_x:.3f}",
                     f"Y: {self.eye_controller.current_eye_y:.3f}",
-                    f"Left: {self.eye_controller.prev_button_states['BTN_WEST']}",
-                    f"Right: {self.eye_controller.prev_button_states['BTN_EAST']}",
-                    f"Both: {both_eyes}",
                 )
 
                 self.timeline.add_eye_data_point(
@@ -253,10 +266,49 @@ class AnimationControlGUI:
                     self.eye_controller.current_eye_y,
                     self.eye_controller.prev_button_states["BTN_WEST"] == 1,
                     self.eye_controller.prev_button_states["BTN_EAST"] == 1,
-                    both_eyes,
+                    self.eye_controller.prev_button_states["BTN_SOUTH"] == 1,
                 )
+            elif not self.is_recording:
+                # Playback mode
+                self.apply_recorded_movements(current_time)
 
         self.root.after(16, self.update_gui)  # ~60fps update
+
+    def apply_recorded_movements(self, current_time):
+        """Apply recorded movements during playback"""
+        if (
+            not self.is_recording
+            and self.is_playing
+            and len(self.timeline.eye_data) > 0
+        ):
+            # Find the appropriate frame for current time
+            frame_to_play = None
+            for frame in self.timeline.eye_data:
+                if frame[0] <= current_time:
+                    frame_to_play = frame
+                else:
+                    break
+
+            if frame_to_play:
+                time_ms, x, y, left_blink, right_blink, both_eyes = frame_to_play
+                print(f"Playing frame at {current_time}ms: X={x:.2f}, Y={y:.2f}")
+
+                # Send position to device
+                command = f"joystick,{x:.2f},{y:.2f}"
+                self.eye_controller.send_message(command)
+
+                # Handle blinks
+                if both_eyes:
+                    if not self.eye_controller.left_eye_closed:
+                        self.eye_controller.send_message("blink_both_start")
+                elif not both_eyes and self.eye_controller.left_eye_closed:
+                    self.eye_controller.send_message("blink_both_end")
+
+                # Update controller state
+                self.eye_controller.current_eye_x = x
+                self.eye_controller.current_eye_y = y
+                self.eye_controller.left_eye_closed = both_eyes
+                self.eye_controller.right_eye_closed = both_eyes
 
     def clear_eye_track(self):
         if messagebox.askyesno("Clear Track", "Clear eye movement recording?"):
