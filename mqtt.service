@@ -1,0 +1,11 @@
+[Unit]
+Description=Skeleton MQTT Service
+
+[Service]
+ExecStart=/usr/bin/python3 /boot/Pi_Eyes/mqtt_service.py --host mqtt.regins.no --name head1 --username x --password y
+Restart=always
+User=root
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -38,12 +38,31 @@ After enabling this service, we also need to add the mouth.py program to the sys
 1. Copy the `mouth.py` file into `/boot/Pi_Eyes/` folder on the Raspberry Pi
 2. Copy the `mouth.service` file into `/etc/systemd/system/` folder as well (you will need sudo)
 3. `sudo chmod +x /boot/Pi_Eyes/mouth.py`
-4. `sudo systemctl daemon-reload`
-5. `sudo systemctl enable mouth.service`
-6. `sudo systemctl start mouth.service`
+4. `sudo pip install paho.mqtt && sudo pip install bleak`
+5. `sudo systemctl daemon-reload`
+6. `sudo systemctl enable mouth.service`
+7. `sudo systemctl start mouth.service`
 
 You can check the status of the new service by running:
 `sudo systemctl status mouth.service`
+
+### Install the MQTT controller (optional)
+
+The head can have a MQTT client that connects to a MQTT server. It provides an interface
+to connect to bluetooth speaker, start, stop and monitor scripts.
+
+This is the main contact point from outside of the head, creating the interface to be able to
+let the head run a prerecorded sound file, mouth script and eyes script in parallel.
+
+To use the bluetooth functionality, trust must be created with the device first (using bluetoothctl for instance).
+
+1. Copy the `mqtt_service.py` file into `/boot/Pi_Eyes/` folder on the Raspberry Pi
+2. Copy the `mqtt.service` file into `/etc/systemd/system/` folder as well (you will need sudo)
+3. `sudo chmod +x /boot/Pi_Eyes/mqtt_service.py`
+4. `sudo nano /etc/systemd/system/mqtt.service` Edit the client name and check credentials.
+5. `sudo systemctl daemon-reload`
+6. `sudo systemctl enable mqtt.service`
+7. `sudo systemctl start mqtt.service`
 
 ### Install the remote control
 
