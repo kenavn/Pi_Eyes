@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from timeline_widget import TimelineCanvas
 from audio_player import AudioPlayer  # Changed from AudioPlayer
 from eye_controller import EyeController
+from mouth_controller import MouthController
 from settings import Settings
 import time
 
@@ -18,8 +19,15 @@ class AnimationControlGUI:
         pygame.init()
         self.settings = Settings()
         self.audio_player = AudioPlayer()
+
+        # Initialize EyeController
         self.eye_controller = EyeController(
             self.settings.get_setting("host"), self.settings.get_setting("eye_port")
+        )
+
+        # Initialize MouthController
+        self.mouth_controller = MouthController(
+            self.settings.get_setting("host"), self.settings.get_setting("mouth_port")
         )
 
         # State variables
@@ -191,7 +199,12 @@ class AnimationControlGUI:
             if target == "eyes":
                 print("Starting new eye recording")
                 self.timeline.clear_eye_data()
-            else:
+            elif target == "mouth":
+                print("Starting new mouth recording")
+                self.timeline.clear_mouth_data()
+            elif target == "both":
+                print("Starting new recording for both eyes and mouth")
+                self.timeline.clear_eye_data()
                 self.timeline.clear_mouth_data()
 
             self.is_playing = True
@@ -203,6 +216,10 @@ class AnimationControlGUI:
             else:
                 # No audio, set recording start time
                 self.recording_start_time = time.time()
+
+            # Enable joystick control for the selected target
+            self.eye_controller.joystick_enabled = target in ["eyes", "both"]
+            self.mouth_controller.joystick_enabled = target in ["mouth", "both"]
 
             print("Recording started")
             self.status_var.set(f"Recording {target}")
@@ -222,8 +239,12 @@ class AnimationControlGUI:
                 self.status_var.set("Resuming playback")
             else:
                 # Start playback from beginning
-                has_recording = len(self.timeline.eye_data) > 0
-                print(f"Attempting playback with {len(self.timeline.eye_data)} frames")
+                has_recording = (
+                    len(self.timeline.eye_data) > 0 or len(self.timeline.mouth_data) > 0
+                )
+                print(
+                    f"Attempting playback with {len(self.timeline.eye_data)} eye frames and {len(self.timeline.mouth_data)} mouth frames"
+                )
 
                 if not has_recording and not self.audio_player.is_loaded():
                     messagebox.showwarning("Warning", "No recording or audio to play")
@@ -237,6 +258,7 @@ class AnimationControlGUI:
 
                 # Disable joystick during playback
                 self.eye_controller.joystick_enabled = False
+                self.mouth_controller.joystick_enabled = False
                 print("Disabled joystick for playback")
 
                 if self.audio_player.is_loaded():
@@ -283,6 +305,7 @@ class AnimationControlGUI:
         self.current_time = 0  # Reset current_time
         # Re-enable joystick when stopping
         self.eye_controller.joystick_enabled = True
+        self.mouth_controller.joystick_enabled = True  # Add this line
         self.timeline.update_time_marker(0)
         self.status_var.set("Stopped")
         self.update_button_states()
@@ -315,32 +338,21 @@ class AnimationControlGUI:
         self.timeline.update_time_marker(self.current_time)
 
         if self.is_playing:
-            if self.is_recording and self.record_target_var.get() == "eyes":
-                # Recording mode
-                print(
-                    f"Recording frame at {self.current_time}ms:",
-                    f"X: {self.eye_controller.current_eye_x:.3f}",
-                    f"Y: {self.eye_controller.current_eye_y:.3f}",
-                )
-
-                self.timeline.add_eye_data_point(
-                    self.current_time,
-                    self.eye_controller.current_eye_x,
-                    self.eye_controller.current_eye_y,
-                    self.eye_controller.prev_button_states["BTN_WEST"] == 1,
-                    self.eye_controller.prev_button_states["BTN_EAST"] == 1,
-                    self.eye_controller.prev_button_states["BTN_SOUTH"] == 1,
-                )
-            elif not self.is_recording:
+            if self.is_recording:
+                target = self.record_target_var.get()
+                if target == "eyes":
+                    # Record eye data
+                    self.record_eye_data()
+                elif target == "mouth":
+                    # Record mouth data
+                    self.record_mouth_data()
+                elif target == "both":
+                    # Record both eye and mouth data
+                    self.record_eye_data()
+                    self.record_mouth_data()
+            else:
                 # Playback mode
-                if len(self.timeline.eye_data) > 0:
-                    last_frame_time = self.timeline.eye_data[-1][0]
-                    if self.current_time >= last_frame_time:
-                        print("Reached end of recording")
-                        self.stop()  # Stop playback at end of recording
-                        # Do not return here; allow the method to continue
-                    else:
-                        self.apply_recorded_movements(self.current_time)
+                self.playback_movements()
         else:
             # Not playing; no need to update movements
             pass
@@ -348,41 +360,54 @@ class AnimationControlGUI:
         # Schedule the next update (~60fps)
         self.root.after(16, self.update_gui)
 
+    def record_eye_data(self):
+        """Record eye movement data"""
+        print(
+            f"Recording eye frame at {self.current_time}ms:",
+            f"X: {self.eye_controller.current_eye_x:.3f}",
+            f"Y: {self.eye_controller.current_eye_y:.3f}",
+        )
+        self.timeline.add_eye_data_point(
+            self.current_time,
+            self.eye_controller.current_eye_x,
+            self.eye_controller.current_eye_y,
+            self.eye_controller.prev_button_states["BTN_WEST"] == 1,
+            self.eye_controller.prev_button_states["BTN_EAST"] == 1,
+            self.eye_controller.prev_button_states["BTN_SOUTH"] == 1,
+        )
+
+    def record_mouth_data(self):
+        """Record mouth movement data"""
+        print(
+            f"Recording mouth frame at {self.current_time}ms:",
+            f"Position: {self.mouth_controller.current_mouth_position}",
+        )
+        self.timeline.add_mouth_data_point(
+            self.current_time,
+            self.mouth_controller.current_mouth_position,
+        )
+        print(f"Added mouth data point at {self.current_time}ms")
+
+    def playback_movements(self):
+        """Playback recorded movements"""
+        if len(self.timeline.eye_data) > 0:
+            print(f"Playback: Applying eye movements at {self.current_time}ms")
+            self.apply_recorded_movements(self.current_time)
+        if len(self.timeline.mouth_data) > 0:
+            print(f"Playback: Applying mouth movements at {self.current_time}ms")
+            self.apply_recorded_mouth_movements(self.current_time)
+
     def apply_recorded_movements(self, current_time):
-        """Apply recorded movements during playback"""
-        if (
-            not self.is_recording
-            and self.is_playing
-            and len(self.timeline.eye_data) > 0
-        ):
-            # Find the appropriate frame for current time
-            frame_to_play = None
-            for frame in self.timeline.eye_data:
-                if frame[0] <= current_time:
-                    frame_to_play = frame
-                else:
-                    break
+        """Apply recorded eye movements during playback"""
+        self.eye_controller.apply_recorded_movement(
+            current_time, self.timeline.eye_data
+        )
 
-            if frame_to_play:
-                time_ms, x, y, left_blink, right_blink, both_eyes = frame_to_play
-                print(f"Playing frame at {current_time}ms: X={x:.2f}, Y={y:.2f}")
-
-                # Send position to device
-                command = f"joystick,{x:.2f},{y:.2f}"
-                self.eye_controller.send_message(command)
-
-                # Handle blinks
-                if both_eyes:
-                    if not self.eye_controller.left_eye_closed:
-                        self.eye_controller.send_message("blink_both_start")
-                elif not both_eyes and self.eye_controller.left_eye_closed:
-                    self.eye_controller.send_message("blink_both_end")
-
-                # Update controller state
-                self.eye_controller.current_eye_x = x
-                self.eye_controller.current_eye_y = y
-                self.eye_controller.left_eye_closed = both_eyes
-                self.eye_controller.right_eye_closed = both_eyes
+    def apply_recorded_mouth_movements(self, current_time):
+        """Apply recorded mouth movements during playback"""
+        self.mouth_controller.apply_recorded_movement(
+            current_time, self.timeline.mouth_data
+        )
 
     def clear_eye_track(self):
         if messagebox.askyesno("Clear Track", "Clear eye movement recording?"):

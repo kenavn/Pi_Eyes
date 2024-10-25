@@ -267,25 +267,44 @@ class TimelineCanvas(tk.Canvas):
 
     def draw_mouth_data(self):
         """Draw mouth movement visualization"""
-        self.delete("mouth_data")
+        self.delete("mouth_data")  # Clear previous mouth data drawings
 
         if not self.mouth_data:
+            print("TimelineCanvas: No mouth data to draw")
             return
 
         width = self.winfo_width()
-        track_height = self.track_heights["mouth"]
-        y_base = self.track_positions["mouth"]
+        if width == 1:  # Width is not properly set yet
+            width = self.winfo_reqwidth()
+            if width == 1:
+                width = 800  # Default width if necessary
+
+        duration_ms = self.duration_ms
+        if duration_ms == 0:
+            print("TimelineCanvas: Duration is zero, cannot draw mouth data")
+            return
+
+        track_height = self.track_heights.get("mouth", 50)
+        y_base = self.track_positions.get("mouth", 150)
 
         points = []
-        for time_ms, value in self.mouth_data:
-            canvas_x = (time_ms / self.duration_ms) * width
-            canvas_y = y_base + (1 - value) * track_height
+        for time_ms, position in self.mouth_data:
+            canvas_x = (time_ms / duration_ms) * width
+            # Map position (0-255) to canvas y-coordinate within the track
+            normalized_value = position / 255  # 0.0 to 1.0
+            canvas_y = y_base + (1 - normalized_value) * track_height
             points.extend([canvas_x, canvas_y])
 
-        if len(points) > 2:
+        if len(points) >= 4:
             self.create_line(
-                *points, fill=self.colors["mouth"], width=1, tags="mouth_data"
+                *points,
+                fill=self.colors.get("mouth", "purple"),
+                width=2,
+                tags="mouth_data",
             )
+            print("TimelineCanvas: Mouth data drawn on canvas")
+        else:
+            print("TimelineCanvas: Not enough points to draw mouth data")
 
     def add_eye_data_point(self, time_ms, x, y, left_blink, right_blink, both_eyes):
         """Add eye movement data point and update visualization"""
@@ -303,9 +322,18 @@ class TimelineCanvas(tk.Canvas):
         self.draw_eye_data()
         print(f"Drew graph with {len(self.eye_data)} points")
 
-    def add_mouth_data_point(self, time_ms, value):
+    def add_mouth_data_point(self, time_ms, position):
         """Add mouth movement data point and update visualization"""
-        self.mouth_data.append([time_ms, value])
+        self.mouth_data.append([time_ms, position])
+        print(
+            f"TimelineCanvas: Added mouth data point at {time_ms}ms, position {position}"
+        )
+
+        # Update duration_ms if necessary
+        if time_ms > self.duration_ms:
+            self.duration_ms = time_ms
+            print(f"TimelineCanvas: Updated duration_ms to {self.duration_ms}")
+
         self.draw_mouth_data()
 
     def update_time_marker(self, time_ms):

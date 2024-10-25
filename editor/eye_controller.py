@@ -311,6 +311,29 @@ class EyeController:
             print(f"Error saving recording: {e}")
             return False
 
+    def apply_recorded_movement(self, current_time, eye_data):
+        """Apply recorded eye movements during playback"""
+        frame_to_play = None
+        for frame in eye_data:
+            if frame[0] <= current_time:
+                frame_to_play = frame
+            else:
+                break
+
+        if frame_to_play:
+            time_ms, x, y, left_blink, right_blink, both_eyes = frame_to_play
+            if (x != self.current_eye_x) or (y != self.current_eye_y):
+                self.current_eye_x = x
+                self.current_eye_y = y
+                command = f"joystick,{x:.2f},{y:.2f}"
+                self.send_message(command)
+                print(
+                    f"EyeController: Applied eye frame at {current_time}ms: X={x:.2f}, Y={y:.2f}"
+                )
+
+            # Handle blinks
+            self.set_blink_state(left=left_blink, right=right_blink, both=both_eyes)
+
     def record_state(self):
         """Add current state to recording queue"""
         if self.is_recording:
