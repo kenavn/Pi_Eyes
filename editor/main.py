@@ -130,12 +130,15 @@ class AnimationControlGUI:
         )
         self.play_record_button.grid(row=0, column=0, padx=2)
 
-        ttk.Button(control_frame, text="⏸", command=self.pause).grid(
-            row=0, column=1, padx=2
+        self.pause_button = ttk.Button(
+            control_frame, text="⏸", command=self.pause, state="disabled"
         )
-        ttk.Button(control_frame, text="⏹", command=self.stop).grid(
-            row=0, column=2, padx=2
+        self.pause_button.grid(row=0, column=1, padx=2)
+
+        self.stop_button = ttk.Button(
+            control_frame, text="⏹", command=self.stop, state="disabled"
         )
+        self.stop_button.grid(row=0, column=2, padx=2)
 
         # Clear buttons
         clear_frame = ttk.Frame(control_frame)
@@ -180,7 +183,7 @@ class AnimationControlGUI:
     def play_or_record(self):
         """Handle play or record based on current mode"""
         if self.record_on_play_var.get():
-            # Record mode [existing recording code remains the same]
+            # Record mode
             target = self.record_target_var.get()
             if target == "eyes":
                 print("Starting new eye recording")
@@ -216,12 +219,25 @@ class AnimationControlGUI:
 
             self.status_var.set("Playing back recording")
 
+        self.update_button_states()
+
+    def update_button_states(self):
+        """Update button states based on current playback/recording state"""
+        if self.is_playing:
+            self.play_record_button.config(state="disabled")
+            self.pause_button.config(state="normal")
+            self.stop_button.config(state="normal")
+        else:
+            self.play_record_button.config(state="normal")
+            self.pause_button.config(state="disabled")
+            self.stop_button.config(state="disabled")
+
     def pause(self):
         if self.audio_player.is_loaded():
             self.audio_player.pause()
         self.is_playing = False
-        self.is_recording = False
         self.status_var.set("Paused")
+        self.update_button_states()
 
     def stop(self):
         if self.audio_player.is_loaded():
@@ -232,6 +248,7 @@ class AnimationControlGUI:
         self.eye_controller.joystick_enabled = True
         self.timeline.update_time_marker(0)
         self.status_var.set("Stopped")
+        self.update_button_states()
 
     def update_gui(self):
         """Update GUI state and timeline"""
@@ -253,7 +270,7 @@ class AnimationControlGUI:
             self.timeline.update_time_marker(current_time)
 
             if self.is_recording and self.record_target_var.get() == "eyes":
-                # Recording mode [existing recording code remains the same]
+                # Recording mode
                 print(
                     f"Recording frame at {current_time}ms:",
                     f"X: {self.eye_controller.current_eye_x:.3f}",
@@ -270,7 +287,13 @@ class AnimationControlGUI:
                 )
             elif not self.is_recording:
                 # Playback mode
-                self.apply_recorded_movements(current_time)
+                if len(self.timeline.eye_data) > 0:
+                    last_frame_time = self.timeline.eye_data[-1][0]
+                    if current_time >= last_frame_time:
+                        print("Reached end of recording")
+                        self.stop()  # Stop playback at end of recording
+                    else:
+                        self.apply_recorded_movements(current_time)
 
         self.root.after(16, self.update_gui)  # ~60fps update
 
