@@ -1,14 +1,11 @@
-# main.py
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 import pygame
-import time
-from audio_player import AudioPlayer
+from datetime import datetime
+from timeline_widget import TimelineCanvas
+from audio_player import AudioPlayer  # Changed from AudioPlayer
 from eye_controller import EyeController
-from mouth_controller import MouthController
-import threading
 from settings import Settings
-from settings_dialog import SettingsDialog
 
 
 class AnimationControlGUI:
@@ -16,72 +13,123 @@ class AnimationControlGUI:
         self.root = root
         self.root.title("Animation Control Studio")
 
-        # Load settings
-        self.settings = Settings()
-
-        # Initialize pygame mixer
+        # Initialize controllers and settings
         pygame.init()
-
-        # Initialize controllers with settings
+        self.settings = Settings()
         self.audio_player = AudioPlayer()
         self.eye_controller = EyeController(
             self.settings.get_setting("host"), self.settings.get_setting("eye_port")
         )
-        self.mouth_controller = MouthController(
-            self.settings.get_setting("host"), self.settings.get_setting("mouth_port")
-        )
+
+        # State variables
+        self.is_recording = False
+        self.is_playing = False
 
         self.setup_gui()
-        self.recording = False
-        self.current_time = 0
 
     def setup_gui(self):
-        # Add menu bar
+        # Main container
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+
+        # Create menu
+        self.create_menu()
+
+        # Create main control section
+        self.create_transport_controls(main_frame)
+
+        # Create timeline
+        self.timeline = TimelineCanvas(main_frame, height=400)
+        self.timeline.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        # Create recording controls
+        self.create_recording_controls(main_frame)
+
+        # Status bar
+        self.status_var = tk.StringVar(value="Ready")
+        ttk.Label(main_frame, textvariable=self.status_var).grid(
+            row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5
+        )
+
+        # Configure grid weights
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+
+        # Start update loop
+        self.update_gui()
+
+    def create_menu(self):
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
 
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Load Audio", command=self.load_audio)
+        file_menu.add_command(label="Save Recording", command=self.save_recording)
+        file_menu.add_separator()
         file_menu.add_command(label="Settings", command=self.show_settings)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_exit)
 
-        # Main container with padding
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+    def create_transport_controls(self, parent):
+        transport_frame = ttk.LabelFrame(parent, text="Transport Controls", padding="5")
+        transport_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
-        # Audio control section
-        audio_frame = ttk.LabelFrame(main_frame, text="Audio Control", padding="5")
-        audio_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-
-        ttk.Button(audio_frame, text="Load Audio", command=self.load_audio).grid(
+        # Audio file controls
+        ttk.Button(transport_frame, text="Load Audio", command=self.load_audio).grid(
             row=0, column=0, padx=5
         )
-        self.audio_path_label = ttk.Label(audio_frame, text="No file selected")
-        self.audio_path_label.grid(row=0, column=1, sticky=tk.W)
+        self.audio_label = ttk.Label(transport_frame, text="No audio loaded")
+        self.audio_label.grid(row=0, column=1, sticky=tk.W)
 
-        # Timeline frame
-        timeline_frame = ttk.Frame(main_frame)
-        timeline_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+    def create_recording_controls(self, parent):
+        control_frame = ttk.LabelFrame(parent, text="Recording Controls", padding="5")
+        control_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
-        # Create timeline canvas
-        self.timeline_canvas = tk.Canvas(timeline_frame, height=100, bg="white")
-        self.timeline_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E))
-        timeline_frame.columnconfigure(0, weight=1)
+        # Record options frame
+        options_frame = ttk.Frame(control_frame)
+        options_frame.grid(row=0, column=0, columnspan=2, pady=5)
 
-        # Time marker
-        self.time_marker = self.timeline_canvas.create_line(
-            0, 0, 0, 100, fill="red", width=2
+        # Record on playback option
+        self.record_on_play_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            options_frame,
+            text="Record on Playback",
+            variable=self.record_on_play_var,
+            command=self.update_record_controls,
+        ).grid(row=0, column=0, padx=5)
+
+        # Target selection (one must be selected, eyes default)
+        self.record_target_var = tk.StringVar(value="eyes")
+        self.eye_radio = ttk.Radiobutton(
+            options_frame,
+            text="Record Eyes",
+            variable=self.record_target_var,
+            value="eyes",
+            state="disabled",
         )
+        self.eye_radio.grid(row=0, column=1, padx=5)
 
-        # Control buttons frame
-        control_frame = ttk.Frame(main_frame)
-        control_frame.grid(row=2, column=0, columnspan=2, pady=5)
-
-        ttk.Button(control_frame, text="▶", command=self.play).grid(
-            row=0, column=0, padx=2
+        self.mouth_radio = ttk.Radiobutton(
+            options_frame,
+            text="Record Mouth",
+            variable=self.record_target_var,
+            value="mouth",
+            state="disabled",
         )
+        self.mouth_radio.grid(row=0, column=2, padx=5)
+
+        # Playback/Record controls
+        control_frame = ttk.Frame(control_frame)
+        control_frame.grid(row=1, column=0, columnspan=2, pady=5)
+
+        self.play_record_button = ttk.Button(
+            control_frame, text="▶", command=self.play_or_record
+        )
+        self.play_record_button.grid(row=0, column=0, padx=2)
+
         ttk.Button(control_frame, text="⏸", command=self.pause).grid(
             row=0, column=1, padx=2
         )
@@ -89,185 +137,156 @@ class AnimationControlGUI:
             row=0, column=2, padx=2
         )
 
-        # Recording controls
-        record_frame = ttk.Frame(main_frame)
-        record_frame.grid(row=3, column=0, columnspan=2, pady=5)
+        # Clear buttons
+        clear_frame = ttk.Frame(control_frame)
+        clear_frame.grid(row=2, column=0, columnspan=2, pady=5)
 
-        self.record_button = ttk.Button(
-            record_frame, text="Record Eyes", command=self.toggle_eye_recording
-        )
-        self.record_button.grid(row=0, column=0, padx=5)
+        ttk.Button(
+            clear_frame, text="Clear Eye Track", command=self.clear_eye_track
+        ).grid(row=0, column=0, padx=5)
+        ttk.Button(
+            clear_frame, text="Clear Mouth Track", command=self.clear_mouth_track
+        ).grid(row=0, column=1, padx=5)
 
-        self.record_mouth_button = ttk.Button(
-            record_frame, text="Record Mouth", command=self.toggle_mouth_recording
-        )
-        self.record_mouth_button.grid(row=0, column=1, padx=5)
-
-        # Status bar
-        self.status_var = tk.StringVar(value="Ready")
-        status_label = ttk.Label(main_frame, textvariable=self.status_var)
-        status_label.grid(row=4, column=0, columnspan=2, pady=5)
-
-        # Recording controls
-        record_frame = ttk.Frame(main_frame)
-        record_frame.grid(row=3, column=0, columnspan=2, pady=5)
-
-        self.record_button = ttk.Button(
-            record_frame, text="Record", command=self.toggle_recording
-        )
-        self.record_button.grid(row=0, column=0, padx=5)
-
-        self.save_button = ttk.Button(
-            record_frame,
-            text="Save Recording",
-            command=self.save_recording,
-            state="disabled",
-        )
-        self.save_button.grid(row=0, column=1, padx=5)
-
-        self.clear_button = ttk.Button(
-            record_frame,
-            text="Clear Recording",
-            command=self.clear_recording,
-            state="disabled",
-        )
-        self.clear_button.grid(row=0, column=2, padx=5)
-
-        # Configure main window to be resizable
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-
-        # Start update loop
-        self.update_timeline()
+    def update_record_controls(self):
+        """Update controls based on record on playback setting"""
+        if self.record_on_play_var.get():
+            self.play_record_button.config(text="⏺")
+            self.eye_radio.config(state="normal")
+            self.mouth_radio.config(state="normal")
+        else:
+            self.play_record_button.config(text="▶")
+            self.eye_radio.config(state="disabled")
+            self.mouth_radio.config(state="disabled")
 
     def load_audio(self):
         file_path = filedialog.askopenfilename(
-            filetypes=[("Wave files", "*.wav"), ("All files", "*.*")]
+            filetypes=[("Audio files", "*.wav"), ("All files", "*.*")]
         )
         if file_path:
             if self.audio_player.load_file(file_path):
-                self.audio_path_label.config(text=file_path.split("/")[-1])
+                self.audio_label.config(text=file_path.split("/")[-1])
+                # Set audio duration for timeline
+                duration_ms = self.audio_player.get_duration()
+                self.timeline.set_audio_duration(duration_ms)
+                # Load audio data for visualization
+                self.timeline.load_audio_file(file_path)
                 self.status_var.set("Audio loaded")
             else:
-                self.status_var.set("Error loading audio file")
+                messagebox.showerror("Error", "Failed to load audio file")
 
-    def play(self):
-        if self.audio_player.is_loaded():
+    def play_or_record(self):
+        """Handle play or record based on current mode"""
+        if self.record_on_play_var.get():
+            # Start recording mode
+            target = self.record_target_var.get()
+            if target == "eyes":
+                self.timeline.clear_eye_data()
+            else:
+                self.timeline.clear_mouth_data()
+
+            # Start a timer for the timeline if no audio
+            if not self.audio_player.is_loaded():
+                self.recording_start_time = datetime.now()
+            else:
+                self.audio_player.play()
+
+            self.is_playing = True
+            self.is_recording = True
+            self.status_var.set(f"Recording {target}...")
+        else:
+            # Normal playback - requires audio
+            if not self.audio_player.is_loaded():
+                messagebox.showwarning(
+                    "Warning", "Please load an audio file for playback"
+                )
+                return
             self.audio_player.play()
-            self.status_var.set("Playing")
+            self.is_playing = True
+            self.status_var.set("Playing...")
 
     def pause(self):
-        self.audio_player.pause()
+        if self.audio_player.is_loaded():
+            self.audio_player.pause()
+        self.is_playing = False
+        self.is_recording = False
         self.status_var.set("Paused")
 
     def stop(self):
-        self.audio_player.stop()
+        if self.audio_player.is_loaded():
+            self.audio_player.stop()
+        self.is_playing = False
+        self.is_recording = False
+        self.timeline.update_time_marker(0)
         self.status_var.set("Stopped")
 
-    def toggle_eye_recording(self):
-        if not self.recording:
-            self.eye_controller.start_recording()
-            self.record_button.config(text="Stop Recording")
-            self.recording = True
-            self.status_var.set("Recording eye movements")
-        else:
-            self.eye_controller.stop_recording()
-            self.record_button.config(text="Record Eyes")
-            self.recording = False
-            self.status_var.set("Eye recording stopped")
+    def update_gui(self):
+        """Update GUI state and timeline"""
+        current_time = 0
 
-    def toggle_mouth_recording(self):
-        # Will be implemented later
-        pass
+        if self.is_playing:
+            if self.audio_player.is_loaded():
+                current_time = self.audio_player.get_position()
+            elif self.is_recording:
+                current_time = int(
+                    (datetime.now() - self.recording_start_time).total_seconds() * 1000
+                )
 
-    def toggle_recording(self):
-        if not self.recording:
-            self.eye_controller.start_recording()
-            self.record_button.config(text="Stop Recording")
-            self.save_button.config(state="disabled")
-            self.clear_button.config(state="disabled")
-            self.recording = True
-            self.status_var.set("Recording eye movements")
-        else:
-            self.eye_controller.stop_recording()
-            self.record_button.config(text="Record")
-            self.save_button.config(state="normal")
-            self.clear_button.config(state="normal")
-            self.recording = False
-            self.status_var.set("Recording stopped")
+            self.timeline.update_time_marker(current_time)
+
+            if self.is_recording and self.record_target_var.get() == "eyes":
+                # Get both-eye blink state
+                both_eyes = self.eye_controller.prev_button_states["BTN_SOUTH"] == 1
+
+                print(
+                    f"Recording eye data at {current_time}ms:",
+                    f"X: {self.eye_controller.current_eye_x:.3f}",
+                    f"Y: {self.eye_controller.current_eye_y:.3f}",
+                    f"Left: {self.eye_controller.prev_button_states['BTN_WEST']}",
+                    f"Right: {self.eye_controller.prev_button_states['BTN_EAST']}",
+                    f"Both: {both_eyes}",
+                )
+
+                self.timeline.add_eye_data_point(
+                    current_time,
+                    self.eye_controller.current_eye_x,
+                    self.eye_controller.current_eye_y,
+                    self.eye_controller.prev_button_states["BTN_WEST"] == 1,
+                    self.eye_controller.prev_button_states["BTN_EAST"] == 1,
+                    both_eyes,
+                )
+
+        self.root.after(16, self.update_gui)  # ~60fps update
+
+    def clear_eye_track(self):
+        if messagebox.askyesno("Clear Track", "Clear eye movement recording?"):
+            self.timeline.clear_eye_data()
+
+    def clear_mouth_track(self):
+        if messagebox.askyesno("Clear Track", "Clear mouth movement recording?"):
+            self.timeline.clear_mouth_data()
 
     def save_recording(self):
-        if not self.eye_controller.recorded_data:
-            messagebox.showwarning("No Data", "No recording data to save")
-            return
-
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            initialfile=f"eye_recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-        )
-
-        if filename:
-            if self.eye_controller.save_recording(filename):
-                self.status_var.set(f"Recording saved to {filename}")
-            else:
-                messagebox.showerror("Save Error", "Failed to save recording")
-
-    def clear_recording(self):
-        if messagebox.askyesno(
-            "Clear Recording", "Are you sure you want to clear the current recording?"
-        ):
-            self.eye_controller.clear_recording()
-            self.save_button.config(state="disabled")
-            self.clear_button.config(state="disabled")
-            self.status_var.set("Recording cleared")
-
-    def update_timeline(self):
-        if self.audio_player.is_playing():
-            current_time = self.audio_player.get_position()
-            timeline_width = self.timeline_canvas.winfo_width()
-            duration = self.audio_player.get_duration()
-            if duration > 0:
-                x_pos = (current_time / duration) * timeline_width
-                self.timeline_canvas.coords(self.time_marker, x_pos, 0, x_pos, 100)
-
-        self.root.after(
-            33, self.update_timeline
-        )  # Update approximately 30 times per second
-
-    def cleanup(self):
-        self.eye_controller.cleanup()
-        pygame.quit()
+        # To be implemented
+        pass
 
     def show_settings(self):
-        dialog = SettingsDialog(self.root, self.settings)
-        self.root.wait_window(dialog.dialog)
-
-        # Reconnect controllers with new settings
-        self.reconnect_controllers()
-
-    def reconnect_controllers(self):
-        # Cleanup existing connections
-        self.eye_controller.cleanup()
-
-        # Reinitialize with new settings
-        self.eye_controller = EyeController(
-            self.settings.get_setting("host"), self.settings.get_setting("eye_port")
-        )
-        self.mouth_controller = MouthController(
-            self.settings.get_setting("host"), self.settings.get_setting("mouth_port")
-        )
+        # To be implemented
+        pass
 
     def on_exit(self):
-        self.cleanup()
+        if self.is_recording:
+            if not messagebox.askyesno("Exit", "Recording in progress. Exit anyway?"):
+                return
+        self.eye_controller.cleanup()
+        pygame.quit()
         self.root.quit()
 
 
 def main():
     root = tk.Tk()
     app = AnimationControlGUI(root)
-    root.protocol("WM_DELETE_WINDOW", lambda: app.on_exit())
+    root.protocol("WM_DELETE_WINDOW", app.on_exit)
     root.mainloop()
 
 
