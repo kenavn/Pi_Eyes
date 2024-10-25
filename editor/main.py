@@ -6,12 +6,13 @@ from timeline_widget import TimelineCanvas
 from audio_player import AudioPlayer  # Changed from AudioPlayer
 from eye_controller import EyeController
 from settings import Settings
+import time
 
 
 class AnimationControlGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Animation Control Studio")
+        self.root.title("Skeleton Studio")
 
         # Initialize controllers and settings
         pygame.init()
@@ -193,9 +194,16 @@ class AnimationControlGUI:
             else:
                 self.timeline.clear_mouth_data()
 
-            self.recording_start_time = datetime.now()
             self.is_playing = True
             self.is_recording = True
+
+            # Start audio playback if loaded
+            if self.audio_player.is_loaded():
+                self.audio_player.play()
+            else:
+                # No audio, set recording start time
+                self.recording_start_time = time.time()
+
             print("Recording started")
             self.status_var.set(f"Recording {target}")
         else:
@@ -207,10 +215,10 @@ class AnimationControlGUI:
 
                 if self.audio_player.is_loaded():
                     self.audio_player.unpause()
+                else:
+                    # Adjust recording_start_time to account for elapsed_time
+                    self.recording_start_time = time.time() - (self.elapsed_time / 1000)
 
-                self.recording_start_time = datetime.now() - timedelta(
-                    milliseconds=self.elapsed_time
-                )
                 self.status_var.set("Resuming playback")
             else:
                 # Start playback from beginning
@@ -222,9 +230,10 @@ class AnimationControlGUI:
                     return
 
                 # Start playback
-                self.recording_start_time = datetime.now()
                 self.is_playing = True
                 self.is_recording = False
+                self.is_paused = False
+                self.elapsed_time = 0  # Reset elapsed time
 
                 # Disable joystick during playback
                 self.eye_controller.joystick_enabled = False
@@ -232,6 +241,9 @@ class AnimationControlGUI:
 
                 if self.audio_player.is_loaded():
                     self.audio_player.play()
+                else:
+                    # No audio, set recording start time
+                    self.recording_start_time = time.time()
 
                 self.status_var.set("Playing back recording")
 
@@ -244,13 +256,11 @@ class AnimationControlGUI:
             self.pause_button.config(state="normal")
             self.stop_button.config(state="normal")
         else:
+            self.play_record_button.config(state="normal")
+            self.pause_button.config(state="disabled")
             if self.is_paused:
-                self.play_record_button.config(state="normal")
-                self.pause_button.config(state="disabled")
                 self.stop_button.config(state="normal")
             else:
-                self.play_record_button.config(state="normal")
-                self.pause_button.config(state="disabled")
                 self.stop_button.config(state="disabled")
 
     def pause(self):
@@ -263,12 +273,14 @@ class AnimationControlGUI:
         self.update_button_states()
 
     def stop(self):
+        print("Stopping playback")
         if self.audio_player.is_loaded():
             self.audio_player.stop()
         self.is_playing = False
         self.is_recording = False
         self.is_paused = False
         self.elapsed_time = 0
+        self.current_time = 0  # Reset current_time
         # Re-enable joystick when stopping
         self.eye_controller.joystick_enabled = True
         self.timeline.update_time_marker(0)
@@ -277,23 +289,32 @@ class AnimationControlGUI:
 
     def update_gui(self):
         """Update GUI state and timeline"""
-        self.current_time = 0
-
         if self.is_playing:
             if self.audio_player.is_loaded():
+                # Get current time from audio player
                 self.current_time = self.audio_player.get_position()
-            elif self.is_recording:
-                self.current_time = int(
-                    (datetime.now() - self.recording_start_time).total_seconds() * 1000
-                )
-            else:  # Playback without audio
-                self.current_time = int(
-                    (datetime.now() - self.recording_start_time).total_seconds() * 1000
-                )
+                # Check if audio has finished playing
+                if (
+                    not self.audio_player.is_playing()
+                    or self.current_time >= self.audio_player.get_duration()
+                ):
+                    print("Audio playback finished")
+                    self.stop()
+                    # Do not return here; allow the method to continue
+            else:
+                # If no audio is loaded, use time elapsed since playback started
+                current_time_ms = (time.time() - self.recording_start_time) * 1000
+                self.current_time = int(current_time_ms)
+        elif self.is_paused:
+            # Keep current_time as is during pause
+            pass
+        else:
+            self.current_time = 0
 
-            # Update timeline marker
-            self.timeline.update_time_marker(self.current_time)
+        # Update timeline marker
+        self.timeline.update_time_marker(self.current_time)
 
+        if self.is_playing:
             if self.is_recording and self.record_target_var.get() == "eyes":
                 # Recording mode
                 print(
@@ -317,10 +338,15 @@ class AnimationControlGUI:
                     if self.current_time >= last_frame_time:
                         print("Reached end of recording")
                         self.stop()  # Stop playback at end of recording
+                        # Do not return here; allow the method to continue
                     else:
                         self.apply_recorded_movements(self.current_time)
+        else:
+            # Not playing; no need to update movements
+            pass
 
-        self.root.after(16, self.update_gui)  # ~60fps update
+        # Schedule the next update (~60fps)
+        self.root.after(16, self.update_gui)
 
     def apply_recorded_movements(self, current_time):
         """Apply recorded movements during playback"""

@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 import numpy as np
-import wave
+from pydub import AudioSegment
 import math
 
 
@@ -130,6 +130,82 @@ class TimelineCanvas(tk.Canvas):
             tags="track_bg",
         )
         self.create_text(5, y_mouth + 10, text="Mouth", anchor="w", tags="track_label")
+
+    def load_audio_file(self, file_path):
+        """Load audio file and extract waveform data using pydub"""
+        try:
+            # Load audio file using pydub
+            audio = AudioSegment.from_file(file_path)
+            self.duration_ms = len(audio)  # Update duration based on audio length
+
+            # Get raw audio data as bytes
+            raw_data = audio.raw_data
+
+            # Determine sample format
+            sample_width = audio.sample_width
+            sample_format = {1: np.int8, 2: np.int16, 4: np.int32}.get(sample_width)
+            if sample_format is None:
+                raise ValueError(f"Unsupported sample width: {sample_width}")
+
+            # Convert raw audio data to numpy array
+            audio_data = np.frombuffer(raw_data, dtype=sample_format)
+
+            # Handle stereo audio by selecting one channel or averaging channels
+            if audio.channels > 1:
+                audio_data = audio_data.reshape((-1, audio.channels))
+                audio_data = audio_data.mean(axis=1)  # Average the channels
+
+            # Normalize audio data to range [-1.0, 1.0]
+            max_int = float(2 ** (8 * sample_width - 1))
+            audio_data = audio_data / max_int
+            self.audio_data = audio_data
+            self.frame_rate = audio.frame_rate
+
+            # After loading audio data, draw it
+            self.draw_audio_data()
+        except Exception as e:
+            print(f"Error loading audio file: {e}")
+            self.audio_data = None
+
+    def draw_audio_data(self):
+        """Draw the audio waveform on the canvas"""
+        self.delete("audio_data")  # Remove any existing audio data drawings
+
+        if self.audio_data is None or len(self.audio_data) == 0:
+            print("No audio data to draw")
+            return
+
+        width = self.winfo_width()
+        if width == 0:
+            width = 800  # Default width if not yet set
+
+        track_height = self.track_heights["audio"]
+        y_base = self.track_positions["audio"]
+        height = track_height
+
+        # Downsample audio data to fit the canvas width
+        n_samples = len(self.audio_data)
+        samples_per_pixel = max(n_samples // width, 1)
+        downsampled_data = self.audio_data[::samples_per_pixel]
+
+        # Normalize downsampled data to fit the track height
+        max_amplitude = np.max(np.abs(downsampled_data))
+        if max_amplitude == 0:
+            max_amplitude = 1  # Prevent division by zero
+
+        normalized_data = (downsampled_data / max_amplitude) * (height / 2)
+
+        # Create points for the waveform
+        points = []
+        for i, sample in enumerate(normalized_data):
+            x = i
+            y = y_base + (height / 2) - sample
+            points.extend([x, y])
+
+        if len(points) > 2:
+            self.create_line(
+                *points, fill=self.colors["audio"], width=1, tags="audio_data"
+            )
 
     def draw_eye_data(self):
         """Draw eye movement visualization"""
@@ -265,6 +341,8 @@ class TimelineCanvas(tk.Canvas):
             self.draw_eye_data()
         if self.mouth_data:
             self.draw_mouth_data()
+        if self.audio_data is not None:
+            self.draw_audio_data()
 
         # Make sure the time marker spans the full height after resize
         _, _, x, _ = self.coords(self.time_marker)

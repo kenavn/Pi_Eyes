@@ -1,62 +1,74 @@
-# audio_player.py
-from pygame import mixer
-import threading
+import pygame
 import time
+from pydub import AudioSegment
 
 
 class AudioPlayer:
     def __init__(self):
-        self.audio_file = None
-        self.playing = False
-        self.paused = False
-        self.current_position = 0
-        self.duration = 0
-        mixer.init()
+        pygame.mixer.init()
+        self.loaded = False
+        self.duration = 0  # Duration in milliseconds
+        self.start_time = None
+        self.paused_time = 0  # Time elapsed before pausing
 
     def load_file(self, file_path):
         try:
-            mixer.music.load(file_path)
-            self.audio_file = file_path
-            # Get audio duration (this is approximate with pygame)
-            sound = mixer.Sound(file_path)
-            self.duration = sound.get_length() * 1000  # Convert to milliseconds
-            del sound  # Clean up the Sound object
+            pygame.mixer.music.load(file_path)
+            self.loaded = True
+            # Use pydub to get accurate duration
+            audio = AudioSegment.from_file(file_path)
+            self.duration = len(audio)  # Duration in milliseconds
             return True
         except Exception as e:
             print(f"Error loading audio file: {e}")
+            self.loaded = False
             return False
 
     def play(self):
-        if self.audio_file:
-            if self.paused:
-                mixer.music.unpause()
-                self.paused = False
-            else:
-                mixer.music.play()
-            self.playing = True
+        if self.loaded:
+            pygame.mixer.music.play()
+            self.start_time = time.time() * 1000  # Record start time in milliseconds
+            self.paused_time = 0
 
     def pause(self):
-        if self.playing:
-            mixer.music.pause()
-            self.playing = False
-            self.paused = True
+        if self.loaded:
+            pygame.mixer.music.pause()
+            if self.start_time:
+                # Calculate time elapsed until pause
+                self.paused_time += time.time() * 1000 - self.start_time
+                self.start_time = None
+
+    def unpause(self):
+        if self.loaded:
+            pygame.mixer.music.unpause()
+            if not self.start_time:
+                self.start_time = time.time() * 1000  # Record new start time
 
     def stop(self):
-        mixer.music.stop()
-        self.playing = False
-        self.paused = False
-        self.current_position = 0
+        if self.loaded:
+            pygame.mixer.music.stop()
+        self.start_time = None
+        self.paused_time = 0
+
+    def is_loaded(self):
+        return self.loaded
+
+    def is_playing(self):
+        return pygame.mixer.music.get_busy()
 
     def get_position(self):
-        if self.playing:
-            return mixer.music.get_pos()
-        return self.current_position
+        if self.loaded:
+            if self.start_time:
+                # Calculate current position
+                current_time = time.time() * 1000
+                position = self.paused_time + (current_time - self.start_time)
+                if position > self.duration:
+                    return self.duration
+                return position
+            else:
+                return self.paused_time
+        else:
+            return 0
 
     def get_duration(self):
         return self.duration
-
-    def is_playing(self):
-        return self.playing
-
-    def is_loaded(self):
-        return self.audio_file is not None
