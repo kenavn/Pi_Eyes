@@ -244,9 +244,14 @@ class AnimationControlGUI:
             self.pause_button.config(state="normal")
             self.stop_button.config(state="normal")
         else:
-            self.play_record_button.config(state="normal")
-            self.pause_button.config(state="disabled")
-            self.stop_button.config(state="disabled")
+            if self.is_paused:
+                self.play_record_button.config(state="normal")
+                self.pause_button.config(state="disabled")
+                self.stop_button.config(state="normal")
+            else:
+                self.play_record_button.config(state="normal")
+                self.pause_button.config(state="disabled")
+                self.stop_button.config(state="disabled")
 
     def pause(self):
         if self.audio_player.is_loaded():

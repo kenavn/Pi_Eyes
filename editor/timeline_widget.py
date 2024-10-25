@@ -240,7 +240,6 @@ class TimelineCanvas(tk.Canvas):
         # Calculate x position
         width = self.winfo_width()
         x_pos = (time_ms / self.duration_ms) * width
-
         # Update marker position
         self.coords(self.time_marker, x_pos, 0, x_pos, self.total_height)
         self.tag_raise(self.time_marker)  # Ensure marker stays on top
