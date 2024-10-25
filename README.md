@@ -64,6 +64,9 @@ To use the bluetooth functionality, trust must be created with the device first 
 6. `sudo systemctl enable mqtt.service`
 7. `sudo systemctl start mqtt.service`
 
+WARNING: The MQTT config currently runs the client in a privieged context (root). That is totally unsafe,
+and will be fixed when I get the time. Make sure never to expose the device on open network.
+
 ### Install the remote control
 
 1. Make sure you have Python installed on your remote machine
