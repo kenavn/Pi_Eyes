@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pygame
-from datetime import datetime
+from datetime import datetime, timedelta
 from timeline_widget import TimelineCanvas
 from audio_player import AudioPlayer  # Changed from AudioPlayer
 from eye_controller import EyeController
@@ -24,6 +24,8 @@ class AnimationControlGUI:
         # State variables
         self.is_recording = False
         self.is_playing = False
+        self.is_paused = False
+        self.elapsed_time = 0
 
         self.setup_gui()
 
@@ -198,26 +200,40 @@ class AnimationControlGUI:
             self.status_var.set(f"Recording {target}")
         else:
             # Playback mode
-            has_recording = len(self.timeline.eye_data) > 0
-            print(f"Attempting playback with {len(self.timeline.eye_data)} frames")
+            if self.is_paused:
+                # Resume playback
+                self.is_playing = True
+                self.is_paused = False
 
-            if not has_recording and not self.audio_player.is_loaded():
-                messagebox.showwarning("Warning", "No recording or audio to play")
-                return
+                if self.audio_player.is_loaded():
+                    self.audio_player.unpause()
 
-            # Start playback
-            self.recording_start_time = datetime.now()
-            self.is_playing = True
-            self.is_recording = False
+                self.recording_start_time = datetime.now() - timedelta(
+                    milliseconds=self.elapsed_time
+                )
+                self.status_var.set("Resuming playback")
+            else:
+                # Start playback from beginning
+                has_recording = len(self.timeline.eye_data) > 0
+                print(f"Attempting playback with {len(self.timeline.eye_data)} frames")
 
-            # Disable joystick during playback
-            self.eye_controller.joystick_enabled = False
-            print("Disabled joystick for playback")
+                if not has_recording and not self.audio_player.is_loaded():
+                    messagebox.showwarning("Warning", "No recording or audio to play")
+                    return
 
-            if self.audio_player.is_loaded():
-                self.audio_player.play()
+                # Start playback
+                self.recording_start_time = datetime.now()
+                self.is_playing = True
+                self.is_recording = False
 
-            self.status_var.set("Playing back recording")
+                # Disable joystick during playback
+                self.eye_controller.joystick_enabled = False
+                print("Disabled joystick for playback")
+
+                if self.audio_player.is_loaded():
+                    self.audio_player.play()
+
+                self.status_var.set("Playing back recording")
 
         self.update_button_states()
 
@@ -236,6 +252,8 @@ class AnimationControlGUI:
         if self.audio_player.is_loaded():
             self.audio_player.pause()
         self.is_playing = False
+        self.is_paused = True
+        self.elapsed_time = self.current_time
         self.status_var.set("Paused")
         self.update_button_states()
 
@@ -244,6 +262,8 @@ class AnimationControlGUI:
             self.audio_player.stop()
         self.is_playing = False
         self.is_recording = False
+        self.is_paused = False
+        self.elapsed_time = 0
         # Re-enable joystick when stopping
         self.eye_controller.joystick_enabled = True
         self.timeline.update_time_marker(0)
@@ -252,33 +272,33 @@ class AnimationControlGUI:
 
     def update_gui(self):
         """Update GUI state and timeline"""
-        current_time = 0
+        self.current_time = 0
 
         if self.is_playing:
             if self.audio_player.is_loaded():
-                current_time = self.audio_player.get_position()
+                self.current_time = self.audio_player.get_position()
             elif self.is_recording:
-                current_time = int(
+                self.current_time = int(
                     (datetime.now() - self.recording_start_time).total_seconds() * 1000
                 )
             else:  # Playback without audio
-                current_time = int(
+                self.current_time = int(
                     (datetime.now() - self.recording_start_time).total_seconds() * 1000
                 )
 
             # Update timeline marker
-            self.timeline.update_time_marker(current_time)
+            self.timeline.update_time_marker(self.current_time)
 
             if self.is_recording and self.record_target_var.get() == "eyes":
                 # Recording mode
                 print(
-                    f"Recording frame at {current_time}ms:",
+                    f"Recording frame at {self.current_time}ms:",
                     f"X: {self.eye_controller.current_eye_x:.3f}",
                     f"Y: {self.eye_controller.current_eye_y:.3f}",
                 )
 
                 self.timeline.add_eye_data_point(
-                    current_time,
+                    self.current_time,
                     self.eye_controller.current_eye_x,
                     self.eye_controller.current_eye_y,
                     self.eye_controller.prev_button_states["BTN_WEST"] == 1,
@@ -289,11 +309,11 @@ class AnimationControlGUI:
                 # Playback mode
                 if len(self.timeline.eye_data) > 0:
                     last_frame_time = self.timeline.eye_data[-1][0]
-                    if current_time >= last_frame_time:
+                    if self.current_time >= last_frame_time:
                         print("Reached end of recording")
                         self.stop()  # Stop playback at end of recording
                     else:
-                        self.apply_recorded_movements(current_time)
+                        self.apply_recorded_movements(self.current_time)
 
         self.root.after(16, self.update_gui)  # ~60fps update
 

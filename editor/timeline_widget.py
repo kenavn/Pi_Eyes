@@ -42,7 +42,7 @@ class TimelineCanvas(tk.Canvas):
 
         # Playback marker
         self.time_marker = self.create_line(
-            0, 0, 0, height, fill="red", width=2, tags="marker"
+            0, 0, 0, height, fill="red", width=2, tags=("marker", "top"), state="normal"
         )
 
         # Create tracks
@@ -234,9 +234,16 @@ class TimelineCanvas(tk.Canvas):
 
     def update_time_marker(self, time_ms):
         """Update playback position marker"""
+        if self.duration_ms <= 0:
+            self.duration_ms = 10000  # Default to 10 seconds if no duration set
+
+        # Calculate x position
         width = self.winfo_width()
-        x_pos = (time_ms / self.duration_ms) * width if self.duration_ms > 0 else 0
+        x_pos = (time_ms / self.duration_ms) * width
+
+        # Update marker position
         self.coords(self.time_marker, x_pos, 0, x_pos, self.total_height)
+        self.tag_raise(self.time_marker)  # Ensure marker stays on top
 
     def clear_eye_data(self):
         """Clear eye movement data"""
@@ -259,3 +266,7 @@ class TimelineCanvas(tk.Canvas):
             self.draw_eye_data()
         if self.mouth_data:
             self.draw_mouth_data()
+
+        # Make sure the time marker spans the full height after resize
+        _, _, x, _ = self.coords(self.time_marker)
+        self.coords(self.time_marker, x, 0, x, self.total_height)
