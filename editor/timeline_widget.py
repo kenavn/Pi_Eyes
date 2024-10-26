@@ -7,7 +7,14 @@ import math
 
 class TimelineCanvas(tk.Canvas):
     def __init__(self, parent, height=400, **kwargs):
+        # Set a minimum width
+        if "width" not in kwargs:
+            kwargs["width"] = 800
+
         super().__init__(parent, height=height, bg="white", **kwargs)
+
+        # Set minimum size
+        self.configure(height=height)
 
         # Track dimensions
         self.total_height = height

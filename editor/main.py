@@ -66,22 +66,19 @@ class AnimationControlGUI:
         # Create main control section
         self.create_audio_controls(main_frame)
 
-        # Create timeline with fixed minimum size
-        self.timeline = TimelineCanvas(main_frame, height=400)
-        self.timeline.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        self.timeline.grid_propagate(
-            False
-        )  # Prevent the widget from resizing its container
-
-        # Set minimum size for timeline container
+        # Create timeline frame container
         timeline_frame = ttk.Frame(main_frame)
         timeline_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        timeline_frame.grid_propagate(False)  # Prevent size changes
-        timeline_frame.configure(width=800, height=400)  # Set minimum size
+        timeline_frame.grid_propagate(False)  # Prevent automatic resizing
+        timeline_frame.configure(height=400)  # Set fixed height
 
-        self.timeline.grid(
-            in_=timeline_frame, row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S)
-        )
+        # Create timeline with fixed dimensions
+        self.timeline = TimelineCanvas(timeline_frame, height=400, width=800)
+        self.timeline.grid(row=0, column=0, sticky=(tk.W, tk.E))
+
+        # Configure timeline frame grid
+        timeline_frame.columnconfigure(0, weight=1)
+        timeline_frame.rowconfigure(0, weight=0)  # Don't allow vertical expansion
 
         # Create recording controls
         self.create_recording_controls(main_frame)
@@ -96,8 +93,6 @@ class AnimationControlGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
-        timeline_frame.columnconfigure(0, weight=1)
-        timeline_frame.rowconfigure(0, weight=1)
 
         # Set minimum window size
         self.root.minsize(800, 600)
@@ -223,7 +218,7 @@ class AnimationControlGUI:
 
     def load_audio(self):
         file_path = filedialog.askopenfilename(
-            filetypes=[("Audio files", "*.wav;*.mp3"), ("All files", "*.*")]
+            filetypes=[("Audio files", "*.wav *.mp3"), ("All files", "*.*")]
         )
         if file_path:
             if self.audio_player.load_file(file_path):
@@ -321,6 +316,7 @@ class AnimationControlGUI:
         """Update the state of menu items based on recording presence"""
         has_eye_recording = len(self.timeline.eye_data) > 0
         has_mouth_recording = len(self.timeline.mouth_data) > 0
+        has_any_recording = has_eye_recording or has_mouth_recording
 
         # Update eye recording reset button
         self.edit_menu.entryconfig(
@@ -339,6 +335,12 @@ class AnimationControlGUI:
             state=(
                 "normal" if (has_eye_recording or has_mouth_recording) else "disabled"
             ),
+        )
+
+        # Update save recording button
+        self.file_menu.entryconfig(
+            "Save Recording",
+            state="normal" if has_any_recording else "disabled",
         )
 
     def update_button_states(self):
