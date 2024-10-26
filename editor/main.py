@@ -2,8 +2,12 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pygame
 from datetime import datetime, timedelta
+import time
+import csv
+import tempfile  # Add this
+import os  # Add this
 from timeline_widget import TimelineCanvas
-from audio_player import AudioPlayer  # Changed from AudioPlayer
+from audio_player import AudioPlayer
 from eye_controller import EyeController
 from mouth_controller import MouthController
 from joystick_controller import JoystickController
@@ -16,8 +20,6 @@ from animation_protocol import (
     EyeFrame,
     MouthFrame,
 )
-import time
-import csv
 
 
 class AnimationControlGUI:
@@ -105,21 +107,34 @@ class AnimationControlGUI:
         self.root.config(menu=menubar)
 
         # File menu
-        self.file_menu = tk.Menu(menubar, tearoff=0)  # Make it an instance variable
+        self.file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=self.file_menu)
+
+        # Audio submenu
         self.file_menu.add_command(label="Load Audio", command=self.load_audio)
+
+        # Animation submenu
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="New Animation", command=self.new_animation)
         self.file_menu.add_command(
-            label="Load Recording", command=self.load_recording
-        )  # Added this line
-        self.file_menu.add_command(
-            label="Save Recording", command=self.save_recording, state="disabled"
+            label="Load Animation Bundle", command=self.load_bundle
         )
+        self.file_menu.add_command(
+            label="Load CSV Recording", command=self.load_recording
+        )
+        self.file_menu.add_command(
+            label="Save Animation Bundle", command=self.save_bundle, state="disabled"
+        )
+        self.file_menu.add_command(
+            label="Save CSV Recording", command=self.save_recording, state="disabled"
+        )
+
         self.file_menu.add_separator()
         self.file_menu.add_command(label="Settings", command=self.show_settings)
         self.file_menu.add_separator()
         self.file_menu.add_command(label="Exit", command=self.on_exit)
 
-        # Edit menu
+        # Edit menu remains the same
         self.edit_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Recording", menu=self.edit_menu)
         self.edit_menu.add_command(
@@ -215,6 +230,150 @@ class AnimationControlGUI:
             self.play_record_button.config(text="▶")
             self.eye_radio.config(state="disabled")
             self.mouth_radio.config(state="disabled")
+
+    def new_animation(self):
+        """Clear all current animation data and audio"""
+        if self.timeline.eye_data or self.timeline.mouth_data:
+            if not messagebox.askyesno(
+                "New Animation", "This will clear all current animation data. Continue?"
+            ):
+                return
+
+        self.timeline.clear_eye_data()
+        self.timeline.clear_mouth_data()
+        self.audio_player.unload()
+        self.audio_label.config(text="No audio loaded")
+        self.update_menu_states()
+        self.status_var.set("New animation started")
+
+    def save_bundle(self):
+        """Save animation as a bundle including audio if present"""
+        if not self.timeline.eye_data and not self.timeline.mouth_data:
+            messagebox.showwarning("No Data", "No animation data available to save.")
+            return
+
+        # Get filename from user
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = filedialog.asksaveasfilename(
+            initialfile=f"animation_bundle_{timestamp}",
+            defaultextension=FileFormat.BUNDLE_EXTENSION,
+            filetypes=[
+                (f"Animation Bundle", f"*{FileFormat.BUNDLE_EXTENSION}"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not filename:
+            return
+
+        try:
+            # Get current audio file path if audio is loaded
+            audio_path = (
+                self.audio_player.get_current_file()
+                if self.audio_player.is_loaded()
+                else None
+            )
+
+            if self.audio_player.is_loaded() and not audio_path:
+                messagebox.showwarning(
+                    "Audio File Missing",
+                    "Audio is loaded but the file path is not available. "
+                    "Audio will not be included in the bundle.",
+                )
+
+            # Save bundle
+            if FileFormat.save_bundle(
+                filename, audio_path, self.timeline.eye_data, self.timeline.mouth_data
+            ):
+                messagebox.showinfo("Success", f"Animation bundle saved to {filename}")
+                self.status_var.set(f"Animation bundle saved to {filename}")
+            else:
+                messagebox.showerror("Error", "Failed to save animation bundle")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save bundle: {str(e)}")
+            print(f"Error details: {e}")
+
+    def load_bundle(self):
+        """Load an animation bundle"""
+        filename = filedialog.askopenfilename(
+            filetypes=[
+                (f"Animation Bundle", f"*{FileFormat.BUNDLE_EXTENSION}"),
+                ("All files", "*.*"),
+            ],
+            title="Load Animation Bundle",
+        )
+
+        if not filename:
+            return
+
+        try:
+            # Load the bundle
+            bundle = FileFormat.load_bundle(filename)
+            if not bundle:
+                raise ValueError("Failed to load animation bundle")
+
+            # Clear existing data
+            self.timeline.clear_eye_data()
+            self.timeline.clear_mouth_data()
+            self.audio_player.unload()
+
+            # If bundle has audio, save it to temp file and load it
+            if bundle.audio_data:
+                audio_ext = bundle.metadata.get("audio_format", "wav")
+                with tempfile.NamedTemporaryFile(
+                    suffix=f".{audio_ext}", delete=False
+                ) as temp_file:
+                    temp_file.write(bundle.audio_data)
+                    temp_path = temp_file.name
+
+                if self.audio_player.load_file(temp_path):
+                    self.audio_label.config(text=bundle.audio_file or "Bundled audio")
+                    duration_ms = self.audio_player.get_duration()
+                    self.timeline.set_audio_duration(duration_ms)
+                    self.timeline.load_audio_file(temp_path)
+
+                # Clean up temp file
+                try:
+                    os.remove(temp_path)
+                except Exception as e:
+                    print(f"Warning: Could not remove temporary audio file: {e}")
+
+            # Load animation data
+            for frame in bundle.eye_frames:
+                self.timeline.add_eye_data_point(
+                    frame.time_ms,
+                    frame.x,
+                    frame.y,
+                    frame.left_closed,
+                    frame.right_closed,
+                    frame.both_closed,
+                )
+
+            for frame in bundle.mouth_frames:
+                self.timeline.add_mouth_data_point(frame.time_ms, frame.position)
+
+            # Update UI
+            self.timeline.update_time_marker(0)
+            self.update_menu_states()
+
+            # Update status
+            total_frames = len(bundle.eye_frames) + len(bundle.mouth_frames)
+            max_time = max(
+                (
+                    [frame.time_ms for frame in bundle.eye_frames]
+                    + [frame.time_ms for frame in bundle.mouth_frames]
+                ),
+                default=0,
+            )
+
+            self.status_var.set(
+                f"Loaded {total_frames} frames ({max_time/1000:.1f} seconds) from bundle"
+            )
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load bundle: {str(e)}")
+            print(f"Error details: {e}")
 
     def load_audio(self):
         file_path = filedialog.askopenfilename(
@@ -332,16 +491,20 @@ class AnimationControlGUI:
         # Update reset all button
         self.edit_menu.entryconfig(
             "Reset All Recordings",
-            state=(
-                "normal" if (has_eye_recording or has_mouth_recording) else "disabled"
-            ),
-        )
-
-        # Update save recording button
-        self.file_menu.entryconfig(
-            "Save Recording",
             state="normal" if has_any_recording else "disabled",
         )
+
+        # Update save buttons
+        self.file_menu.entryconfig(
+            "Save Animation Bundle",
+            state="normal" if has_any_recording else "disabled",
+        )
+        self.file_menu.entryconfig(
+            "Save CSV Recording",
+            state="normal" if has_any_recording else "disabled",
+        )
+
+        print(f"Menu states updated - Has recordings: {has_any_recording}")
 
     def update_button_states(self):
         """Update button states based on current playback/recording state"""

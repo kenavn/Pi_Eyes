@@ -10,6 +10,7 @@ class AudioPlayer:
         self.duration = 0  # Duration in milliseconds
         self.start_time = None
         self.paused_time = 0  # Time elapsed before pausing
+        self.current_file_path = None  # Add this to track the current file path
 
     def load_file(self, file_path):
         try:
@@ -18,10 +19,12 @@ class AudioPlayer:
             # Use pydub to get accurate duration
             audio = AudioSegment.from_file(file_path)
             self.duration = len(audio)  # Duration in milliseconds
+            self.current_file_path = file_path  # Store the file path
             return True
         except Exception as e:
             print(f"Error loading audio file: {e}")
             self.loaded = False
+            self.current_file_path = None
             return False
 
     def play(self):
@@ -49,6 +52,20 @@ class AudioPlayer:
             pygame.mixer.music.stop()
         self.start_time = None
         self.paused_time = 0
+
+    def unload(self):
+        """Unload the current audio file"""
+        if self.loaded:
+            pygame.mixer.music.unload()
+            self.loaded = False
+            self.duration = 0
+            self.start_time = None
+            self.paused_time = 0
+            self.current_file_path = None
+
+    def get_current_file(self):
+        """Get the path of the currently loaded audio file"""
+        return self.current_file_path
 
     def is_loaded(self):
         return self.loaded
