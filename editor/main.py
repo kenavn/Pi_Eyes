@@ -55,7 +55,7 @@ class AnimationControlGUI:
         self.create_menu()
 
         # Create main control section
-        self.create_transport_controls(main_frame)
+        self.create_audio_controls(main_frame)
 
         # Create timeline
         self.timeline = TimelineCanvas(main_frame, height=400)
@@ -92,8 +92,25 @@ class AnimationControlGUI:
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_exit)
 
-    def create_transport_controls(self, parent):
-        transport_frame = ttk.LabelFrame(parent, text="Transport Controls", padding="5")
+        # Edit menu
+        self.edit_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Recording", menu=self.edit_menu)
+        self.edit_menu.add_command(
+            label="Reset Eye Recording", command=self.clear_eye_track, state="disabled"
+        )
+        self.edit_menu.add_command(
+            label="Reset Mouth Recording",
+            command=self.clear_mouth_track,
+            state="disabled",
+        )
+        self.edit_menu.add_command(
+            label="Reset All Recordings",
+            command=self.clear_all_tracks,
+            state="disabled",
+        )
+
+    def create_audio_controls(self, parent):
+        transport_frame = ttk.LabelFrame(parent, text="Audio Controls", padding="5")
         transport_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         # Audio file controls
@@ -158,17 +175,6 @@ class AnimationControlGUI:
             control_frame, text="⏹", command=self.stop, state="disabled"
         )
         self.stop_button.grid(row=0, column=2, padx=2)
-
-        # Clear buttons
-        clear_frame = ttk.Frame(control_frame)
-        clear_frame.grid(row=2, column=0, columnspan=2, pady=5)
-
-        ttk.Button(
-            clear_frame, text="Clear Eye Track", command=self.clear_eye_track
-        ).grid(row=0, column=0, padx=5)
-        ttk.Button(
-            clear_frame, text="Clear Mouth Track", command=self.clear_mouth_track
-        ).grid(row=0, column=1, padx=5)
 
     def update_record_controls(self):
         """Update controls based on record on playback setting"""
@@ -278,6 +284,30 @@ class AnimationControlGUI:
                 self.status_var.set("Playing back recording")
 
         self.update_button_states()
+
+    def update_menu_states(self):
+        """Update the state of menu items based on recording presence"""
+        has_eye_recording = len(self.timeline.eye_data) > 0
+        has_mouth_recording = len(self.timeline.mouth_data) > 0
+
+        # Update eye recording reset button
+        self.edit_menu.entryconfig(
+            "Reset Eye Recording", state="normal" if has_eye_recording else "disabled"
+        )
+
+        # Update mouth recording reset button
+        self.edit_menu.entryconfig(
+            "Reset Mouth Recording",
+            state="normal" if has_mouth_recording else "disabled",
+        )
+
+        # Update reset all button
+        self.edit_menu.entryconfig(
+            "Reset All Recordings",
+            state=(
+                "normal" if (has_eye_recording or has_mouth_recording) else "disabled"
+            ),
+        )
 
     def update_button_states(self):
         """Update button states based on current playback/recording state"""
@@ -393,6 +423,7 @@ class AnimationControlGUI:
             self.eye_controller.prev_button_states["BTN_EAST"] == 1,
             self.eye_controller.prev_button_states["BTN_SOUTH"] == 1,
         )
+        self.update_menu_states()  # Update menu states when recording
 
     def record_mouth_data(self):
         """Record mouth movement data"""
@@ -405,6 +436,7 @@ class AnimationControlGUI:
             self.mouth_controller.current_mouth_position,
         )
         print(f"Added mouth data point at {self.current_time}ms")
+        self.update_menu_states()  # Update menu states when recording
 
     def playback_movements(self):
         """Playback recorded movements"""
@@ -428,12 +460,31 @@ class AnimationControlGUI:
         )
 
     def clear_eye_track(self):
-        if messagebox.askyesno("Clear Track", "Clear eye movement recording?"):
+        if messagebox.askyesno(
+            "Reset Eye Recording",
+            "Are you sure you want to reset the eye movement recording?",
+        ):
             self.timeline.clear_eye_data()
+            self.update_menu_states()
+            self.status_var.set("Eye recording reset")
 
     def clear_mouth_track(self):
-        if messagebox.askyesno("Clear Track", "Clear mouth movement recording?"):
+        if messagebox.askyesno(
+            "Reset Mouth Recording",
+            "Are you sure you want to reset the mouth movement recording?",
+        ):
             self.timeline.clear_mouth_data()
+            self.update_menu_states()
+            self.status_var.set("Mouth recording reset")
+
+    def clear_all_tracks(self):
+        if messagebox.askyesno(
+            "Reset All Recordings", "Are you sure you want to reset all recordings?"
+        ):
+            self.timeline.clear_eye_data()
+            self.timeline.clear_mouth_data()
+            self.update_menu_states()
+            self.status_var.set("All recordings reset")
 
     def save_recording(self):
         # To be implemented
@@ -445,36 +496,40 @@ class AnimationControlGUI:
         old_settings = {
             "host": self.settings.get_setting("host"),
             "eye_port": self.settings.get_setting("eye_port"),
-            "mouth_port": self.settings.get_setting("mouth_port")
+            "mouth_port": self.settings.get_setting("mouth_port"),
         }
-        
+
         # Create and show settings dialog
         dialog = SettingsDialog(self.root, self.settings)
         self.root.wait_window(dialog.dialog)
-        
+
         # Check if settings were changed
-        if (old_settings["host"] != self.settings.get_setting("host") or
-            old_settings["eye_port"] != self.settings.get_setting("eye_port") or
-            old_settings["mouth_port"] != self.settings.get_setting("mouth_port")):
-            
+        if (
+            old_settings["host"] != self.settings.get_setting("host")
+            or old_settings["eye_port"] != self.settings.get_setting("eye_port")
+            or old_settings["mouth_port"] != self.settings.get_setting("mouth_port")
+        ):
+
             # Reinitialize controllers with new settings
             self.eye_controller.cleanup()
             self.mouth_controller.cleanup()
-            
+
             self.eye_controller = EyeController(
                 self.settings.get_setting("host"),
                 self.settings.get_setting("eye_port"),
-                self.joystick_controller
+                self.joystick_controller,
             )
-            
+
             self.mouth_controller = MouthController(
                 self.settings.get_setting("host"),
                 self.settings.get_setting("mouth_port"),
-                self.joystick_controller
+                self.joystick_controller,
             )
-            
-            messagebox.showinfo("Settings Updated", 
-                              "Controllers have been reinitialized with new settings.")
+
+            messagebox.showinfo(
+                "Settings Updated",
+                "Controllers have been reinitialized with new settings.",
+            )
 
     def on_exit(self):
         if self.is_recording:
