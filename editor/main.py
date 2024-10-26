@@ -9,7 +9,15 @@ from mouth_controller import MouthController
 from joystick_controller import JoystickController
 from settings_dialog import SettingsDialog
 from settings import Settings
+from animation_protocol import (
+    FileFormat,
+    CommandType,
+    UDPProtocol,
+    EyeFrame,
+    MouthFrame,
+)
 import time
+import csv
 
 
 class AnimationControlGUI:
@@ -47,6 +55,7 @@ class AnimationControlGUI:
         self.setup_gui()
 
     def setup_gui(self):
+        """Set up the GUI with stable layout"""
         # Main container
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -57,9 +66,22 @@ class AnimationControlGUI:
         # Create main control section
         self.create_audio_controls(main_frame)
 
-        # Create timeline
+        # Create timeline with fixed minimum size
         self.timeline = TimelineCanvas(main_frame, height=400)
         self.timeline.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        self.timeline.grid_propagate(
+            False
+        )  # Prevent the widget from resizing its container
+
+        # Set minimum size for timeline container
+        timeline_frame = ttk.Frame(main_frame)
+        timeline_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        timeline_frame.grid_propagate(False)  # Prevent size changes
+        timeline_frame.configure(width=800, height=400)  # Set minimum size
+
+        self.timeline.grid(
+            in_=timeline_frame, row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S)
+        )
 
         # Create recording controls
         self.create_recording_controls(main_frame)
@@ -74,6 +96,11 @@ class AnimationControlGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
+        timeline_frame.columnconfigure(0, weight=1)
+        timeline_frame.rowconfigure(0, weight=1)
+
+        # Set minimum window size
+        self.root.minsize(800, 600)
 
         # Start update loop
         self.update_gui()
@@ -83,14 +110,19 @@ class AnimationControlGUI:
         self.root.config(menu=menubar)
 
         # File menu
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Load Audio", command=self.load_audio)
-        file_menu.add_command(label="Save Recording", command=self.save_recording)
-        file_menu.add_separator()
-        file_menu.add_command(label="Settings", command=self.show_settings)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.on_exit)
+        self.file_menu = tk.Menu(menubar, tearoff=0)  # Make it an instance variable
+        menubar.add_cascade(label="File", menu=self.file_menu)
+        self.file_menu.add_command(label="Load Audio", command=self.load_audio)
+        self.file_menu.add_command(
+            label="Load Recording", command=self.load_recording
+        )  # Added this line
+        self.file_menu.add_command(
+            label="Save Recording", command=self.save_recording, state="disabled"
+        )
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="Settings", command=self.show_settings)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="Exit", command=self.on_exit)
 
         # Edit menu
         self.edit_menu = tk.Menu(menubar, tearoff=0)
@@ -191,7 +223,7 @@ class AnimationControlGUI:
 
     def load_audio(self):
         file_path = filedialog.askopenfilename(
-            filetypes=[("Audio files", "*.wav"), ("All files", "*.*")]
+            filetypes=[("Audio files", "*.wav;*.mp3"), ("All files", "*.*")]
         )
         if file_path:
             if self.audio_player.load_file(file_path):
@@ -347,6 +379,7 @@ class AnimationControlGUI:
         self.timeline.update_time_marker(0)
         self.status_var.set("Stopped")
         self.update_button_states()
+        self.update_menu_states()
 
     def update_gui(self):
         """Update GUI state and timeline"""
@@ -487,8 +520,91 @@ class AnimationControlGUI:
             self.status_var.set("All recordings reset")
 
     def save_recording(self):
-        # To be implemented
-        pass
+        """Save recorded eye and mouth movement data to a CSV file"""
+        if not self.timeline.eye_data and not self.timeline.mouth_data:
+            messagebox.showwarning("No Data", "No recording data available to save.")
+            return
+
+        # Get filename from user
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = filedialog.asksaveasfilename(
+            initialfile=f"animation_recording_{timestamp}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+
+        if not filename:
+            return
+
+        # Save using the protocol module
+        if FileFormat.save_to_csv(
+            filename, self.timeline.eye_data, self.timeline.mouth_data
+        ):
+            messagebox.showinfo("Success", f"Recording saved to {filename}")
+            self.status_var.set(f"Recording saved to {filename}")
+        else:
+            messagebox.showerror("Error", "Failed to save recording")
+
+    def load_recording(self):
+        """Load a previously saved recording"""
+        filename = filedialog.askopenfilename(
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Load Recording",
+        )
+
+        if not filename:
+            return
+
+        try:
+            # Temporarily disable UI updates
+            self.root.update_idletasks()
+
+            # Clear existing recordings
+            self.timeline.clear_eye_data()
+            self.timeline.clear_mouth_data()
+
+            # Load using the protocol module
+            eye_frames, mouth_frames = FileFormat.load_from_csv(filename)
+
+            # Convert to timeline format
+            for frame in eye_frames:
+                self.timeline.add_eye_data_point(
+                    frame.time_ms,
+                    frame.x,
+                    frame.y,
+                    frame.left_closed,
+                    frame.right_closed,
+                    frame.both_closed,
+                )
+
+            for frame in mouth_frames:
+                self.timeline.add_mouth_data_point(frame.time_ms, frame.position)
+
+            # Set timeline duration if needed
+            max_time = max(
+                (frame.time_ms for frame in eye_frames + mouth_frames), default=0
+            )
+            if max_time > self.timeline.duration_ms:
+                self.timeline.set_audio_duration(max_time)
+
+            # Force timeline to update its view
+            self.timeline.update_time_marker(0)  # This will trigger a redraw
+
+            # Update menu states
+            self.update_menu_states()
+
+            # Update status
+            total_frames = len(eye_frames) + len(mouth_frames)
+            self.status_var.set(
+                f"Loaded {total_frames} frames ({max_time/1000:.1f} seconds) from {filename}"
+            )
+
+            # Re-enable UI updates
+            self.root.update()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load recording: {str(e)}")
+            print(f"Error details: {e}")
 
     def show_settings(self):
         """Show the settings dialog and update controllers if settings change"""
