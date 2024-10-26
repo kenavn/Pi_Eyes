@@ -13,19 +13,29 @@ from mouth_controller import MouthController
 from joystick_controller import JoystickController
 from settings_dialog import SettingsDialog
 from settings import Settings
-from animation_protocol import (
-    FileFormat,
-    CommandType,
-    UDPProtocol,
-    EyeFrame,
-    MouthFrame,
-)
+from animation_protocol import FileFormat
+
+NM_FILE = "File"
+NM_BUNDLE_SAVE = "Save Animation Bundle ..."
+NM_BUNDLE_LOAD = "Load Animation Bundle ..."
+NM_BUNDLE_NEW = "New Animation"
+NM_REC = "Recording"
+NM_REC_SAVE = "Save CSV Recording ..."
+NM_REC_LOAD = "Load CSV Recording ..."
+NM_AUDIO_LOAD = "Load Audio ..."
+NM_AUDIO_SAVE = "Save Audio ..."
+NM_SETTINGS = "Settings ..."
+NM_REC_EYE_RESET = "Reset Eye Recording"
+NM_REC_MOUTH_RESET = "Reset Mouth Recording"
+NM_REC_ALL_RESET = "Reset All Recordings"
+NM_EXIT = "Exit"
+LBL_WINDOW = "Animatronics Studio"
 
 
 class AnimationControlGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Skeleton Studio")
+        self.root.title(LBL_WINDOW)
 
         # Initialize controllers and settings
         pygame.init()
@@ -108,58 +118,57 @@ class AnimationControlGUI:
 
         # File menu
         self.file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=self.file_menu)
+        menubar.add_cascade(label=NM_FILE, menu=self.file_menu)
 
-        # Audio submenu
-        self.file_menu.add_command(label="Load Audio", command=self.load_audio)
+        # Artifacts submenu
+        self.file_menu.add_command(label=NM_AUDIO_LOAD, command=self.load_audio)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label=NM_REC_LOAD, command=self.load_recording)
+        self.file_menu.add_command(
+            label=NM_REC_SAVE,
+            command=self.save_recording,
+            state="disabled",
+        )
 
         # Animation submenu
         self.file_menu.add_separator()
-        self.file_menu.add_command(label="New Animation", command=self.new_animation)
+        self.file_menu.add_command(label=NM_BUNDLE_NEW, command=self.new_animation)
+        self.file_menu.add_command(label=NM_BUNDLE_LOAD, command=self.load_bundle)
         self.file_menu.add_command(
-            label="Load Animation Bundle", command=self.load_bundle
-        )
-        self.file_menu.add_command(
-            label="Load CSV Recording", command=self.load_recording
-        )
-        self.file_menu.add_command(
-            label="Save Animation Bundle", command=self.save_bundle, state="disabled"
-        )
-        self.file_menu.add_command(
-            label="Save CSV Recording", command=self.save_recording, state="disabled"
+            label=NM_BUNDLE_SAVE, command=self.save_bundle, state="disabled"
         )
 
         self.file_menu.add_separator()
-        self.file_menu.add_command(label="Settings", command=self.show_settings)
+        self.file_menu.add_command(label=NM_SETTINGS, command=self.show_settings)
         self.file_menu.add_separator()
-        self.file_menu.add_command(label="Exit", command=self.on_exit)
+        self.file_menu.add_command(label=NM_EXIT, command=self.on_exit)
 
-        # Edit menu remains the same
+        # Recording menu
         self.edit_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Recording", menu=self.edit_menu)
+        menubar.add_cascade(label=NM_REC, menu=self.edit_menu)
         self.edit_menu.add_command(
-            label="Reset Eye Recording", command=self.clear_eye_track, state="disabled"
+            label=NM_REC_EYE_RESET, command=self.clear_eye_track, state="disabled"
         )
         self.edit_menu.add_command(
-            label="Reset Mouth Recording",
+            label=NM_REC_MOUTH_RESET,
             command=self.clear_mouth_track,
             state="disabled",
         )
         self.edit_menu.add_command(
-            label="Reset All Recordings",
+            label=NM_REC_ALL_RESET,
             command=self.clear_all_tracks,
             state="disabled",
         )
 
     def create_audio_controls(self, parent):
-        transport_frame = ttk.LabelFrame(parent, text="Audio Controls", padding="5")
-        transport_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        audio_frame = ttk.LabelFrame(parent, text="Audio Controls", padding="5")
+        audio_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         # Audio file controls
-        ttk.Button(transport_frame, text="Load Audio", command=self.load_audio).grid(
+        ttk.Button(audio_frame, text="Load Audio", command=self.load_audio).grid(
             row=0, column=0, padx=5
         )
-        self.audio_label = ttk.Label(transport_frame, text="No audio loaded")
+        self.audio_label = ttk.Label(audio_frame, text="No audio loaded")
         self.audio_label.grid(row=0, column=1, sticky=tk.W)
 
     def create_recording_controls(self, parent):
@@ -243,6 +252,7 @@ class AnimationControlGUI:
         self.timeline.clear_mouth_data()
         self.audio_player.unload()
         self.audio_label.config(text="No audio loaded")
+        self.timeline.clear_audio_data()
         self.update_menu_states()
         self.status_var.set("New animation started")
 
@@ -479,28 +489,28 @@ class AnimationControlGUI:
 
         # Update eye recording reset button
         self.edit_menu.entryconfig(
-            "Reset Eye Recording", state="normal" if has_eye_recording else "disabled"
+            NM_REC_EYE_RESET, state="normal" if has_eye_recording else "disabled"
         )
 
         # Update mouth recording reset button
         self.edit_menu.entryconfig(
-            "Reset Mouth Recording",
+            NM_REC_MOUTH_RESET,
             state="normal" if has_mouth_recording else "disabled",
         )
 
         # Update reset all button
         self.edit_menu.entryconfig(
-            "Reset All Recordings",
+            NM_REC_ALL_RESET,
             state="normal" if has_any_recording else "disabled",
         )
 
         # Update save buttons
         self.file_menu.entryconfig(
-            "Save Animation Bundle",
+            NM_BUNDLE_SAVE,
             state="normal" if has_any_recording else "disabled",
         )
         self.file_menu.entryconfig(
-            "Save CSV Recording",
+            NM_REC_SAVE,
             state="normal" if has_any_recording else "disabled",
         )
 
@@ -534,6 +544,11 @@ class AnimationControlGUI:
         if self.audio_player.is_loaded():
             self.audio_player.stop()
         self.is_playing = False
+
+        if self.is_recording:
+            self.record_on_play_var.set(False)  # Turn off the recording mode
+            self.update_record_controls()  # Update controls
+
         self.is_recording = False
         self.is_paused = False
         self.elapsed_time = 0

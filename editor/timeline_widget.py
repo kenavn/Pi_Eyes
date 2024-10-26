@@ -365,6 +365,11 @@ class TimelineCanvas(tk.Canvas):
         self.mouth_data = []
         self.delete("mouth_data")
 
+    def clear_audio_data(self):
+        """Clear audio waveform data"""
+        self.audio_data = None
+        self.delete("audio_data")
+
     def set_audio_duration(self, duration_ms):
         """Set the timeline duration"""
         self.duration_ms = max(duration_ms, 10000)  # Minimum 10 seconds
