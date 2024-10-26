@@ -49,23 +49,22 @@ You can check the status of the new service by running:
 ### Install the MQTT controller (optional)
 
 The head can have a MQTT client that connects to a MQTT server. It provides an interface
-to connect to bluetooth speaker, start, stop and monitor scripts.
+to play animation bundles created by the animatronic editor. These need to be copied into the head
+so that they reside in a predefined folder.
 
 This is the main contact point from outside of the head, creating the interface to be able to
-let the head run a prerecorded sound file, mouth script and eyes script in parallel.
+let the head run a prerecorded sound file, mouth script and eyes script.
 
-To use the bluetooth functionality, trust must be created with the device first (using bluetoothctl for instance).
-
-1. Copy the `mqtt_service.py` file into `/boot/Pi_Eyes/` folder on the Raspberry Pi
+1. Copy the `editor/animationDaemon.py` file into `/boot/Pi_Eyes/` folder on the Raspberry Pi
+   together with: `animation_protocol.py`, `audio_player.py` and `bundlePlayer.py`.
 2. Copy the `mqtt.service` file into `/etc/systemd/system/` folder as well (you will need sudo)
 3. `sudo chmod +x /boot/Pi_Eyes/mqtt_service.py`
-4. `sudo nano /etc/systemd/system/mqtt.service` Edit the client name and check credentials.
+4. `sudo nano /etc/systemd/system/mqtt.service` Edit the client name and check credentials and script folder.
 5. `sudo systemctl daemon-reload`
 6. `sudo systemctl enable mqtt.service`
 7. `sudo systemctl start mqtt.service`
 
-WARNING: The MQTT config currently runs the client in a privieged context (root). That is totally unsafe,
-and will be fixed when I get the time. Make sure never to expose the device on open network.
+More on this service in the README-MQTT.md file.
 
 ### Install the remote control
 

@@ -2,7 +2,7 @@
 Description=Skeleton MQTT Service
 
 [Service]
-ExecStart=/usr/bin/python3 /boot/Pi_Eyes/mqtt_service.py --host mqtt.regins.no --name head1 --username x --password y
+ExecStart=/usr/bin/python3 /boot/Pi_Eyes/animationDaemon.py --mqtt-host mqtt.regins.no --robot-name head1 --mqtt-user x --mqtt-pass y --animations-dir /etc/anim
 Restart=always
 User=root
 Environment=PYTHONUNBUFFERED=1

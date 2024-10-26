@@ -1,168 +1,212 @@
-# MQTT Controller for Robot Head Management
+# Animation Daemon Documentation
 
-## Overview
+The Animation Daemon is a Python service that controls robot animations via MQTT commands. It manages eye and mouth animations, handles audio playback, and provides status updates about the robot's current state.
 
-The MQTT controller provides a way to manage scripts and Bluetooth connections through MQTT messages. All topics are prefixed with `heads/{client_name}/` where `{client_name}` is specified when starting the service.
+## Installation
 
-## Starting the Service
+### Requirements
+
+- Python 3.7+
+- paho-mqtt
+- pygame (for audio playback)
+
+### Dependencies
 
 ```bash
-python3 mqtt_service.py \
-    --name [client_name] \
-    --host [mqtt_broker] \
-    --port [mqtt_port] \
-    --username [mqtt_username] \
-    --password [mqtt_password] \
-    --debug  # Optional, for verbose logging
+pip install paho-mqtt pygame
 ```
 
-## MQTT Topics Structure
+## Running the Daemon
 
-### Control Topics
-
-Topics used to send commands to the controller:
-
-#### Script Management
-
-1. Start a script:
-
+```bash
+python animation_daemon.py \
+  --mqtt-host mqtt.example.com \
+  --mqtt-port 1883 \
+  --mqtt-user "username" \
+  --mqtt-pass "password" \
+  --robot-name robot1 \
+  --robot-host 192.168.1.100 \
+  --animations-dir /path/to/animations
 ```
-Topic: heads/{client_name}/control/script/start
-Payload: {
-    "id": "unique_script_id",
-    "path": "/path/to/script.py"
+
+### Command Line Arguments
+
+| Argument         | Description                          | Default   |
+| ---------------- | ------------------------------------ | --------- |
+| --mqtt-host      | MQTT broker hostname                 | localhost |
+| --mqtt-port      | MQTT broker port                     | 1883      |
+| --mqtt-user      | MQTT username                        | None      |
+| --mqtt-pass      | MQTT password                        | None      |
+| --robot-name     | Robot identifier for MQTT topics     | Required  |
+| --robot-host     | Robot's IP address                   | 127.0.0.1 |
+| --eye-port       | UDP port for eye control             | 5005      |
+| --mouth-port     | UDP port for mouth control           | 5006      |
+| --animations-dir | Directory containing animation files | Required  |
+
+## MQTT Interface
+
+### Topic Structure
+
+All topics follow the pattern: `robot/{robot-name}/...`
+
+### Available Topics
+
+#### Status Updates
+
+- Topic: `robot/{robot-name}/status`
+- Retained: Yes
+- QoS: 1
+- Message Format:
+
+```json
+{
+  "online": true,
+  "state": "idle",
+  "current_animation": null
 }
 ```
 
-2. Stop a script:
+or
 
-```
-Topic: heads/{client_name}/control/script/stop
-Payload: {
-    "id": "unique_script_id"
+```json
+{
+  "online": true,
+  "state": "playing",
+  "current_animation": "animation1.skelanim"
 }
 ```
 
-3. Get script status:
+or when offline:
 
-```
-Topic: heads/{client_name}/control/script/status
-Payload: {
-    "id": "unique_script_id"  # Optional - omit for all scripts
+```json
+{
+  "online": false
 }
 ```
 
-#### Bluetooth Management
+#### Play Animation
 
-1. Connect to a Bluetooth device:
+- Topic: `robot/{robot-name}/animation/play`
+- Direction: Input
+- Message Format:
 
-```
-Topic: heads/{client_name}/control/bluetooth/connect
-Payload: {
-    "address": "XX:XX:XX:XX:XX:XX"
+```json
+{
+  "file": "animation1.skelanim",
+  "delay": 200,
+  "loop": false
 }
 ```
 
-### Status Topics
+| Field | Type    | Description                                    | Required            |
+| ----- | ------- | ---------------------------------------------- | ------------------- |
+| file  | string  | Animation filename (must be in animations-dir) | Yes                 |
+| delay | number  | Delay in milliseconds before starting          | No (default: 0)     |
+| loop  | boolean | Whether to loop the animation                  | No (default: false) |
 
-Topics where the controller publishes status updates:
+#### Stop Animation
 
-#### Script Status Updates
+- Topic: `robot/{robot-name}/animation/stop`
+- Direction: Input
+- Message Format: `{}` (empty JSON object)
 
-```
-Topic: heads/{client_name}/status/script/{script_id}
-Payload: {
-    "id": "script_id",
-    "status": "status_value",
-    "timestamp": unix_timestamp,
-    "error": "error_message"  # Only present if there was an error
+#### System Commands
+
+- Topic: `robot/{robot-name}/system`
+- Direction: Input
+- Message Format:
+
+```json
+{
+  "command": "shutdown"
 }
 ```
 
-Possible status values:
+or
 
-- `running`: Script is currently executing
-- `finished`: Script completed successfully
-- `failed`: Script failed with error
-- `stopped`: Script was manually stopped
-- `killed`: Script was forcefully terminated
-- `not_found`: Script ID doesn't exist
-
-#### All Scripts Status
-
-```
-Topic: heads/{client_name}/status/scripts
-Payload: {
-    "script_id_1": {
-        "status": "status_value",
-        "runtime": seconds_since_start,
-        "path": "/path/to/script.py"
-    },
-    "script_id_2": {
-        ...
-    }
+```json
+{
+  "command": "reboot"
 }
 ```
-
-#### Bluetooth Status
-
-```
-Topic: heads/{client_name}/status/bluetooth
-Payload: {
-    "status": "status_value",
-    "address": "XX:XX:XX:XX:XX:XX",
-    "error": "error_message"  # Only present if there was an error
-}
-```
-
-Possible status values:
-
-- `connected`: Successfully connected to device
-- `failed`: Failed to connect
-- `disconnected`: Device disconnected
 
 ## Example Usage
 
-### Starting a Script
+### Monitor Robot Status
 
 ```bash
-mosquitto_pub -t "heads/head1/control/script/start" \
-    -m '{"id": "eyes1", "path": "/scripts/wherever/eyes.py"}'
+mosquitto_sub -h mqtt.example.com -u username -P password \
+  -t "robot/robot1/status"
 ```
 
-### Stopping the Eyes Script
+### Play Animation
 
 ```bash
-mosquitto_pub -t "heads/head1/control/script/stop" \
-    -m '{"id": "eyes1"}'
+mosquitto_pub -h mqtt.example.com -u username -P password \
+  -t "robot/robot1/animation/play" \
+  -m '{"file":"animation1.skelanim","delay":200,"loop":false}'
 ```
 
-### Connecting to a Bluetooth Speaker
+### Stop Current Animation
 
 ```bash
-mosquitto_pub -t "heads/head1/control/bluetooth/connect" \
-    -m '{"address": "00:11:22:33:44:55"}'
+mosquitto_pub -h mqtt.example.com -u username -P password \
+  -t "robot/robot1/animation/stop" \
+  -m '{}'
 ```
 
-### Getting Status of All Running Scripts
+### Shutdown Robot
 
 ```bash
-mosquitto_pub -t "heads/head1/control/script/status" \
-    -m '{}'
+mosquitto_pub -h mqtt.example.com -u username -P password \
+  -t "robot/robot1/system" \
+  -m '{"command":"shutdown"}'
 ```
 
-## Monitoring Status Updates
-
-You can monitor all status updates using:
+### Reboot Robot
 
 ```bash
-mosquitto_sub -v -t "heads/head1/status/#"
+mosquitto_pub -h mqtt.example.com -u username -P password \
+  -t "robot/robot1/system" \
+  -m '{"command":"reboot"}'
 ```
 
-## Notes
+## Security Notes
 
-- Scripts are run asynchronously, allowing multiple scripts to run simultaneously
-- Each script must have a unique ID
-- Starting a script with an ID that's already running will result in an error
-- The service automatically cleans up any running scripts on shutdown
-- All Bluetooth connections are automatically closed on shutdown
+1. The daemon only allows playing animation files from within the specified animations directory
+2. System commands (shutdown/reboot) require appropriate system permissions
+3. MQTT communication should ideally be secured using TLS
+4. Authentication credentials should be kept secure
+
+## Status Messages
+
+### Online Status
+
+The daemon uses MQTT's last will feature to notify when the robot goes offline unexpectedly. The status topic will be updated with `{"online": false}` if the daemon disconnects abnormally.
+
+### Animation States
+
+- `idle`: No animation is currently playing
+- `playing`: An animation is currently being played
+
+## Error Handling
+
+- Invalid animation files will be rejected
+- Attempts to access files outside the animations directory will be blocked
+- MQTT connection failures will be reported
+- UDP communication errors will be logged
+
+## Startup Sequence
+
+1. Connects to MQTT broker with authentication
+2. Sets up last will message
+3. Publishes initial online status
+4. Subscribes to command topics
+5. Begins processing MQTT messages
+
+## Shutdown Sequence
+
+1. Stops any playing animation
+2. Publishes offline status
+3. Closes MQTT connection
+4. Cleans up resources
