@@ -103,38 +103,80 @@ class FileFormat:
                         audio_data = audio_file.read()
                         bundle.writestr(FileFormat.AUDIO_NAME, audio_data)
 
-                # Save animation data
+                # Sort all animation data by timestamp before saving
+                all_data = []
+
+                # Add eye data
+                for time_ms, x, y, left_blink, right_blink, both_eyes in eye_data:
+                    all_data.append(
+                        {
+                            "time_ms": time_ms,
+                            "type": "eye",
+                            "data": {
+                                "x": x,
+                                "y": y,
+                                "left_eye_closed": left_blink,
+                                "right_eye_closed": right_blink,
+                                "both_eyes_closed": both_eyes,
+                            },
+                        }
+                    )
+
+                # Add mouth data
+                for time_ms, position in mouth_data:
+                    all_data.append(
+                        {
+                            "time_ms": time_ms,
+                            "type": "mouth",
+                            "data": {"position": position},
+                        }
+                    )
+
+                # Sort by timestamp
+                all_data.sort(key=lambda x: x["time_ms"])
+
+                # Save sorted animation data
                 animation_data = io.StringIO()
                 writer = csv.writer(animation_data)
 
                 # Write header
-                header = ["time_ms", "type"]
-                if eye_data:
-                    header.extend(
-                        [
-                            "eye_x",
-                            "eye_y",
-                            "left_eye_closed",
-                            "right_eye_closed",
-                            "both_eyes_closed",
-                        ]
-                    )
-                if mouth_data:
-                    header.append("mouth_position")
+                header = [
+                    "time_ms",
+                    "type",
+                    "eye_x",
+                    "eye_y",
+                    "left_eye_closed",
+                    "right_eye_closed",
+                    "both_eyes_closed",
+                    "mouth_position",
+                ]
                 writer.writerow(header)
 
-                # Write data
-                for time_ms, x, y, left_blink, right_blink, both_eyes in eye_data:
-                    row = [time_ms, "eye", x, y, left_blink, right_blink, both_eyes]
-                    if mouth_data:
-                        row.append(None)
-                    writer.writerow(row)
-
-                for time_ms, position in mouth_data:
-                    if eye_data:
-                        row = [time_ms, "mouth", None, None, None, None, None, position]
-                    else:
-                        row = [time_ms, "mouth", position]
+                # Write sorted data
+                for frame in all_data:
+                    row = [frame["time_ms"], frame["type"]]
+                    if frame["type"] == "eye":
+                        row.extend(
+                            [
+                                frame["data"]["x"],
+                                frame["data"]["y"],
+                                frame["data"]["left_eye_closed"],
+                                frame["data"]["right_eye_closed"],
+                                frame["data"]["both_eyes_closed"],
+                                None,  # mouth_position
+                            ]
+                        )
+                    else:  # mouth frame
+                        row.extend(
+                            [
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,  # eye data
+                                frame["data"]["position"],
+                            ]
+                        )
                     writer.writerow(row)
 
                 bundle.writestr(FileFormat.ANIMATION_NAME, animation_data.getvalue())
@@ -147,7 +189,11 @@ class FileFormat:
                     "audio_format": (
                         os.path.splitext(audio_path)[1][1:] if audio_path else None
                     ),
-                    "frame_count": len(eye_data) + len(mouth_data),
+                    "frame_count": len(all_data),
+                    "duration_ms": (
+                        max(frame["time_ms"] for frame in all_data) if all_data else 0
+                    ),
+                    "pre_sorted": True,  # Flag to indicate data is already sorted
                 }
                 bundle.writestr(
                     FileFormat.MANIFEST_NAME, json.dumps(manifest, indent=2)
@@ -174,7 +220,7 @@ class FileFormat:
                     else None
                 )
 
-                # Load animation data
+                # Load pre-sorted animation data
                 animation_csv = io.StringIO(
                     bundle.read(FileFormat.ANIMATION_NAME).decode("utf-8")
                 )
@@ -183,9 +229,10 @@ class FileFormat:
                 eye_frames = []
                 mouth_frames = []
 
+                # Data is already sorted by time_ms from save
                 for row in reader:
-                    # Convert time_ms to int, handling float values
                     time_ms = int(float(row["time_ms"]))
+
                     if row["type"] == "eye":
                         eye_frames.append(
                             EyeFrame(
@@ -227,7 +274,7 @@ class FileFormat:
 
         except Exception as e:
             print(f"Error loading bundle: {e}")
-            raise  # Re-raise the exception to be caught by the caller
+            raise
 
     @staticmethod
     def save_to_csv(

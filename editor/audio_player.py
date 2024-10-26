@@ -56,7 +56,18 @@ class AudioPlayer:
     def unload(self):
         """Unload the current audio file"""
         if self.loaded:
-            pygame.mixer.music.unload()
+            pygame.mixer.music.stop()
+            try:
+                # Try to unload if the method exists
+                if hasattr(pygame.mixer.music, "unload"):
+                    pygame.mixer.music.unload()
+                else:
+                    # For older pygame versions, reinitialize the mixer
+                    pygame.mixer.quit()
+                    pygame.mixer.init()
+            except Exception as e:
+                print(f"Warning during audio unload: {e}")
+
             self.loaded = False
             self.duration = 0
             self.start_time = None
