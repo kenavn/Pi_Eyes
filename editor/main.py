@@ -7,6 +7,7 @@ from audio_player import AudioPlayer  # Changed from AudioPlayer
 from eye_controller import EyeController
 from mouth_controller import MouthController
 from joystick_controller import JoystickController
+from settings_dialog import SettingsDialog
 from settings import Settings
 import time
 
@@ -439,8 +440,41 @@ class AnimationControlGUI:
         pass
 
     def show_settings(self):
-        # To be implemented
-        pass
+        """Show the settings dialog and update controllers if settings change"""
+        # Store old settings for comparison
+        old_settings = {
+            "host": self.settings.get_setting("host"),
+            "eye_port": self.settings.get_setting("eye_port"),
+            "mouth_port": self.settings.get_setting("mouth_port")
+        }
+        
+        # Create and show settings dialog
+        dialog = SettingsDialog(self.root, self.settings)
+        self.root.wait_window(dialog.dialog)
+        
+        # Check if settings were changed
+        if (old_settings["host"] != self.settings.get_setting("host") or
+            old_settings["eye_port"] != self.settings.get_setting("eye_port") or
+            old_settings["mouth_port"] != self.settings.get_setting("mouth_port")):
+            
+            # Reinitialize controllers with new settings
+            self.eye_controller.cleanup()
+            self.mouth_controller.cleanup()
+            
+            self.eye_controller = EyeController(
+                self.settings.get_setting("host"),
+                self.settings.get_setting("eye_port"),
+                self.joystick_controller
+            )
+            
+            self.mouth_controller = MouthController(
+                self.settings.get_setting("host"),
+                self.settings.get_setting("mouth_port"),
+                self.joystick_controller
+            )
+            
+            messagebox.showinfo("Settings Updated", 
+                              "Controllers have been reinitialized with new settings.")
 
     def on_exit(self):
         if self.is_recording:
