@@ -6,6 +6,7 @@ from timeline_widget import TimelineCanvas
 from audio_player import AudioPlayer  # Changed from AudioPlayer
 from eye_controller import EyeController
 from mouth_controller import MouthController
+from joystick_controller import JoystickController
 from settings import Settings
 import time
 
@@ -20,14 +21,20 @@ class AnimationControlGUI:
         self.settings = Settings()
         self.audio_player = AudioPlayer()
 
-        # Initialize EyeController
+        # Initialize centralized joystick controller
+        self.joystick_controller = JoystickController()
+
+        # Initialize controllers with joystick controller
         self.eye_controller = EyeController(
-            self.settings.get_setting("host"), self.settings.get_setting("eye_port")
+            self.settings.get_setting("host"),
+            self.settings.get_setting("eye_port"),
+            self.joystick_controller,
         )
 
-        # Initialize MouthController
         self.mouth_controller = MouthController(
-            self.settings.get_setting("host"), self.settings.get_setting("mouth_port")
+            self.settings.get_setting("host"),
+            self.settings.get_setting("mouth_port"),
+            self.joystick_controller,
         )
 
         # State variables
@@ -323,39 +330,49 @@ class AnimationControlGUI:
                 ):
                     print("Audio playback finished")
                     self.stop()
-                    # Do not return here; allow the method to continue
+                    self.update_button_states()  # Make sure buttons update
             else:
                 # If no audio is loaded, use time elapsed since playback started
                 current_time_ms = (time.time() - self.recording_start_time) * 1000
                 self.current_time = int(current_time_ms)
+
+                # Check if we've reached the end of our recorded data
+                max_time = 0
+                if self.timeline.eye_data:
+                    max_time = max(max_time, self.timeline.eye_data[-1][0])
+                if self.timeline.mouth_data:
+                    max_time = max(max_time, self.timeline.mouth_data[-1][0])
+
+                # Add a small buffer to max_time to ensure we catch the end
+                if max_time > 0 and self.current_time >= (
+                    max_time + 100
+                ):  # 100ms buffer
+                    print("Reached end of recorded data")
+                    self.stop()
+                    self.update_button_states()  # Make sure buttons update
+
         elif self.is_paused:
             # Keep current_time as is during pause
             pass
         else:
             self.current_time = 0
 
-        # Update timeline marker
+        # Always update timeline marker
         self.timeline.update_time_marker(self.current_time)
 
+        # Handle playback/recording states
         if self.is_playing:
             if self.is_recording:
                 target = self.record_target_var.get()
                 if target == "eyes":
-                    # Record eye data
                     self.record_eye_data()
                 elif target == "mouth":
-                    # Record mouth data
                     self.record_mouth_data()
                 elif target == "both":
-                    # Record both eye and mouth data
                     self.record_eye_data()
                     self.record_mouth_data()
             else:
-                # Playback mode
                 self.playback_movements()
-        else:
-            # Not playing; no need to update movements
-            pass
 
         # Schedule the next update (~60fps)
         self.root.after(16, self.update_gui)
@@ -429,7 +446,10 @@ class AnimationControlGUI:
         if self.is_recording:
             if not messagebox.askyesno("Exit", "Recording in progress. Exit anyway?"):
                 return
+
+        self.joystick_controller.cleanup()
         self.eye_controller.cleanup()
+        self.mouth_controller.cleanup()
         pygame.quit()
         self.root.quit()
 

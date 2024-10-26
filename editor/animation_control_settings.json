@@ -1,5 +1,5 @@
 {
-    "host": "raspieyes2",
-    "eye_port": 5005,
-    "mouth_port": 5006
+  "host": "raspieyes",
+  "eye_port": 5005,
+  "mouth_port": 5006
 }
