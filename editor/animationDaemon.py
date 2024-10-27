@@ -110,17 +110,65 @@ class AnimationDaemon:
             self.command_topics["status"], json.dumps(status_data), qos=1, retain=True
         )
 
+    def validate_animation_file(self, filename: str) -> Optional[Path]:
+        """Validate that the animation file exists and is within animations directory"""
+        try:
+            print(f"Validating file: {filename}")
+            print(f"Animations directory: {self.animations_dir}")
+
+            file_path = Path(filename)
+            if not file_path.is_absolute():
+                file_path = self.animations_dir / file_path
+
+            file_path = file_path.resolve()
+            print(f"Resolved path: {file_path}")
+
+            # Check if the file is within the animations directory
+            if self.animations_dir in file_path.parents and file_path.exists():
+                print(f"File validation successful: {file_path}")
+                return file_path
+
+            print(
+                f"File validation failed - file: {file_path}, animations dir: {self.animations_dir}"
+            )
+            if not file_path.exists():
+                print(f"File does not exist")
+            if self.animations_dir not in file_path.parents:
+                print(f"File is not in animations directory")
+            return None
+
+        except Exception as e:
+            print(f"Error validating animation file: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return None
+
     def handle_system_command(self, command: str):
         """Handle system commands"""
         try:
             if command == "shutdown":
                 print("Executing shutdown command...")
-                self.handle_shutdown(None, None)
-                subprocess.run(["sudo", "shutdown", "-h", "now"])
+                self.client.publish(
+                    self.command_topics["status"],
+                    json.dumps({"online": False}),
+                    qos=1,
+                    retain=True,
+                )
+                self.client.disconnect()
+                # Perform system shutdown
+                subprocess.run("sudo shutdown -h now", shell=True)
             elif command == "reboot":
                 print("Executing reboot command...")
-                self.handle_shutdown(None, None)
-                subprocess.run(["sudo", "reboot"])
+                self.client.publish(
+                    self.command_topics["status"],
+                    json.dumps({"online": False}),
+                    qos=1,
+                    retain=True,
+                )
+                self.client.disconnect()
+                # Perform system reboot
+                subprocess.run("sudo reboot", shell=True)
             else:
                 print(f"Unknown system command: {command}")
         except Exception as e:
