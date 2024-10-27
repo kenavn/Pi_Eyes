@@ -9,29 +9,51 @@ import pygame
 import tempfile
 import os
 from animation_protocol import FileFormat, CommandType
-from queue import Queue, Empty  # Fixed import
+from queue import Queue, Empty
 import threading
 
 
 class BundlePlayer:
+    VERSION = "1.1.0"
+
     def __init__(
         self, host: str, eye_port: int, mouth_port: int, start_delay_ms: int = 0
     ):
+        print(f"BundlePlayer Version {self.VERSION}")
         self.host = host
         self.eye_port = eye_port
         self.mouth_port = mouth_port
         self.start_delay_ms = start_delay_ms
 
-        # Create UDP sockets
-        self.eye_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.mouth_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Initialize state
+        self.initialize_state()
 
+        # Initialize networking and pygame only once
+        self.initialize_networking()
+        self.initialize_pygame()
+
+    def initialize_state(self):
+        """Initialize/reset internal state variables"""
         # Track current states
         self.current_eye_x = 0.5
         self.current_eye_y = 0.5
         self.left_eye_closed = False
         self.right_eye_closed = False
         self.current_mouth_position = 128
+
+        # Animation state
+        self.eye_data = []
+        self.mouth_data = []
+        self.is_playing = False
+        self.current_time = 0
+        self.recording_start_time = 0
+        self.current_audio = None
+
+    def initialize_networking(self):
+        """Initialize network sockets"""
+        # Create UDP sockets
+        self.eye_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.mouth_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         # Button command queue
         self.button_command_queue = Queue()
@@ -40,17 +62,6 @@ class BundlePlayer:
             target=self._process_button_commands, daemon=True
         )
         self.button_command_thread.start()
-
-        # Initialize pygame for audio
-        pygame.mixer.init()
-        self.current_audio = None
-
-        # Animation state
-        self.eye_data = []
-        self.mouth_data = []
-        self.is_playing = False
-        self.current_time = 0
-        self.recording_start_time = 0
 
         # Send initial eye commands
         self.send_eye_command(CommandType.JOYSTICK_CONNECTED)
@@ -61,6 +72,36 @@ class BundlePlayer:
         time.sleep(0.1)
         self.send_eye_command(CommandType.AUTO_PUPIL_OFF)
         time.sleep(0.1)
+
+    def initialize_pygame(self):
+        """Initialize pygame mixer only once"""
+        if not pygame.mixer.get_init():
+            try:
+                pygame.mixer.init()
+                print("Pygame mixer initialized successfully")
+            except Exception as e:
+                print(f"Error initializing pygame mixer: {e}")
+
+    def reset(self):
+        """Reset the player state for reuse"""
+        # Stop any current playback
+        if self.current_audio:
+            pygame.mixer.music.stop()
+            try:
+                os.unlink(self.current_audio)
+            except:
+                pass
+            self.current_audio = None
+
+        # Reset state variables
+        self.initialize_state()
+
+        # Clear command queue
+        while not self.button_command_queue.empty():
+            try:
+                self.button_command_queue.get_nowait()
+            except Empty:
+                break
 
     def _process_button_commands(self):
         """Process button commands with retries"""
@@ -137,29 +178,45 @@ class BundlePlayer:
                 print(f"Error sending mouth command: {e}", file=sys.stderr)
 
     def prepare_bundle(self, filename: str) -> bool:
+        """Prepare a new animation bundle for playback"""
         try:
+            # Stop any current audio playback but keep mixer alive
+            if self.current_audio:
+                pygame.mixer.music.stop()
+
+            # Clean up previous temp file if it exists
+            if self.current_audio and os.path.exists(self.current_audio):
+                try:
+                    os.unlink(self.current_audio)
+                except:
+                    pass
+
             bundle = FileFormat.load_bundle(filename)
             if not bundle:
                 return False
 
-            # Convert eye frames to same format as working implementation
-            self.eye_data = []
-            for frame in bundle.eye_frames:
-                self.eye_data.append(
-                    (
-                        frame.time_ms,
-                        frame.x,
-                        frame.y,
-                        frame.left_closed,
-                        frame.right_closed,
-                        frame.both_closed,
-                    )
+            # Convert eye frames
+            self.eye_data = [
+                (
+                    frame.time_ms,
+                    frame.x,
+                    frame.y,
+                    frame.left_closed,
+                    frame.right_closed,
+                    frame.both_closed,
                 )
+                for frame in bundle.eye_frames
+            ]
 
-            # Convert mouth frames to same format as working implementation
-            self.mouth_data = []
-            for frame in bundle.mouth_frames:
-                self.mouth_data.append((frame.time_ms, frame.position))
+            # Convert mouth frames
+            self.mouth_data = [
+                (frame.time_ms, frame.position) for frame in bundle.mouth_frames
+            ]
+
+            # Reset playback state
+            self.current_time = 0
+            self.is_playing = False
+            self.current_audio = None
 
             # Handle audio if present
             if bundle.audio_data:
@@ -173,6 +230,7 @@ class BundlePlayer:
                 try:
                     pygame.mixer.music.load(temp_file.name)
                     self.current_audio = temp_file.name
+                    print(f"Successfully loaded audio: {temp_file.name}")
                 except Exception as e:
                     print(f"Warning: Could not load audio: {e}")
                     os.unlink(temp_file.name)
@@ -274,54 +332,43 @@ class BundlePlayer:
             while True:
                 print("\nStarting playback...")
                 self.is_playing = True
-
-                # Start timing
                 self.recording_start_time = time.time()
 
-                # Start audio if available
                 if self.current_audio:
+                    print("Starting audio playback")
                     pygame.mixer.music.play()
 
-                # Main playback loop running at ~60fps
                 while self.is_playing:
                     if not self.update():
                         break
-                    time.sleep(1 / 60)  # Approximately 60fps
+                    time.sleep(1 / 60)
 
                 if not loop:
                     break
 
-                # For looping
                 if self.current_audio:
                     pygame.mixer.music.stop()
                 time.sleep(0.5)
 
         except KeyboardInterrupt:
             print("\nPlayback interrupted by user")
+        except Exception as e:
+            print(f"Error during playback: {e}")
         finally:
-            self.cleanup()
+            self.is_playing = False
 
     def cleanup(self):
-        """Clean up resources"""
-        print("\nCleaning up...")
+        """Final cleanup when shutting down"""
+        print("\nFinal cleanup...")
 
-        # Stop the command processing thread
         self.running = False
-        if self.button_command_thread.is_alive():
-            self.button_command_queue.put(None)  # Sentinel value
+        if (
+            hasattr(self, "button_command_thread")
+            and self.button_command_thread.is_alive()
+        ):
+            self.button_command_queue.put(None)
             self.button_command_thread.join(timeout=1.0)
 
-        if self.current_audio:
-            try:
-                pygame.mixer.music.stop()
-            except:
-                pass
-            try:
-                os.unlink(self.current_audio)
-            except:
-                pass
-
-        # Reset any active states if sockets are still available
         if hasattr(self, "eye_socket") and self.eye_socket:
             try:
                 if self.left_eye_closed:
@@ -329,28 +376,33 @@ class BundlePlayer:
                 if self.right_eye_closed:
                     self.send_eye_command(CommandType.BLINK_RIGHT_END)
 
-                # Re-enable autonomous features
                 self.send_eye_command(CommandType.AUTO_MOVEMENT_ON)
                 time.sleep(0.1)
                 self.send_eye_command(CommandType.AUTO_BLINK_ON)
                 time.sleep(0.1)
                 self.send_eye_command(CommandType.AUTO_PUPIL_ON)
 
-                # Close socket
                 self.eye_socket.close()
             except:
                 pass
-            self.eye_socket = None
 
-        # Close mouth socket
         if hasattr(self, "mouth_socket") and self.mouth_socket:
             try:
                 self.mouth_socket.close()
             except:
                 pass
-            self.mouth_socket = None
 
-        pygame.mixer.quit()
+        # Clean up final audio file
+        if self.current_audio and os.path.exists(self.current_audio):
+            try:
+                pygame.mixer.music.stop()
+                os.unlink(self.current_audio)
+            except:
+                pass
+
+        # Only quit pygame when totally shutting down
+        if pygame.mixer.get_init():
+            pygame.mixer.quit()
 
 
 def main():

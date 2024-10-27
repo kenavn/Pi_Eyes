@@ -19,6 +19,8 @@ class PlayerStatus(Enum):
 
 
 class AnimationDaemon:
+    VERSION = "1.1.0"
+
     def __init__(
         self,
         mqtt_host: str,
@@ -40,6 +42,8 @@ class AnimationDaemon:
         self.eye_port = eye_port
         self.mouth_port = mouth_port
         self.animations_dir = Path(animations_dir).resolve()
+
+        print(f"Animation Daemon v{self.VERSION}")
 
         # Verify animations directory
         if not self.animations_dir.is_dir():
@@ -233,7 +237,6 @@ class AnimationDaemon:
                 print("Error: No filename provided in play command")
                 return
 
-            # Validate file path
             file_path = self.validate_animation_file(filename)
             if not file_path:
                 print(f"Error: Invalid animation file path: {filename}")
@@ -241,11 +244,15 @@ class AnimationDaemon:
 
             print(f"Playing animation: {file_path} (delay: {delay_ms}ms, loop: {loop})")
 
-            # Stop any current playback
-            if self.player:
-                self.player.is_playing = False
+            # Create player if needed
+            if self.player is None:
+                self.player = BundlePlayer(
+                    self.robot_host, self.eye_port, self.mouth_port
+                )
 
-            # Load and play new animation
+            # Stop any current playback
+            self.player.is_playing = False
+
             if self.player.prepare_bundle(str(file_path)):
                 self.status = PlayerStatus.PLAYING
                 self.current_animation = file_path.name
@@ -260,6 +267,9 @@ class AnimationDaemon:
                 print(f"Finished playing: {file_path}")
             else:
                 print(f"Failed to load animation: {file_path}")
+                self.status = PlayerStatus.IDLE
+                self.current_animation = None
+                self.publish_status()
 
         except Exception as e:
             print(f"Error in play command: {e}")
