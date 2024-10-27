@@ -80,18 +80,21 @@ sudo usermod -aG audio,pulse,pulse-access kenneth
 
    1. Copy the `editor/animationDaemon.py` file into `/boot/Pi_Eyes/` folder on the Raspberry Pi
       together with: `animation_protocol.py`, `audio_player.py` and `bundlePlayer.py`.
-   2. `sudo chmod +x /boot/Pi_Eyes/mqtt_service.py`
-   3. `sudo nano /etc/systemd/system/mqtt.service` Edit the client name and check credentials and script folder.
+   2. Copy the `mqtt.service` file into `/etc/systemd/system/` folder (Sudo needed)
+   3. `sudo chmod +x /boot/Pi_Eyes/animationDaemon.py`
+   4. `sudo nano /etc/systemd/system/mqtt.service` Edit the client name and check credentials and script folder.
+   5. Make sure the configured script folder you set up in the step above folder exists and the service user has access to it.
 
 4. Install and start the service:
 
 ```bash
-sudo cp mqtt.service /etc/systemd/system/mqtt.service
 sudo systemctl daemon-reload
 sudo systemctl enable mqtt
 sudo systemctl restart systemd-resolved
 sudo systemctl restart mqtt
 ```
+
+Check everything is working by looking at the relevant MQTT topics, or check out the troubleshooting section below.
 
 ## MQTT Interface
 
