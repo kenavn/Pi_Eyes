@@ -14,7 +14,7 @@ import threading
 
 
 class BundlePlayer:
-    VERSION = "1.1.0"
+    VERSION = "1.1.4"  # Increment version for tracking
 
     def __init__(
         self, host: str, eye_port: int, mouth_port: int, start_delay_ms: int = 0
@@ -24,6 +24,9 @@ class BundlePlayer:
         self.eye_port = eye_port
         self.mouth_port = mouth_port
         self.start_delay_ms = start_delay_ms
+
+        # Initialize running state first
+        self.running = True
 
         # Initialize state
         self.initialize_state()
@@ -45,6 +48,7 @@ class BundlePlayer:
         self.eye_data = []
         self.mouth_data = []
         self.is_playing = False
+        self.is_auto_movement = True
         self.current_time = 0
         self.recording_start_time = 0
         self.current_audio = None
@@ -57,21 +61,10 @@ class BundlePlayer:
 
         # Button command queue
         self.button_command_queue = Queue()
-        self.running = True
         self.button_command_thread = threading.Thread(
             target=self._process_button_commands, daemon=True
         )
         self.button_command_thread.start()
-
-        # Send initial eye commands
-        self.send_eye_command(CommandType.JOYSTICK_CONNECTED)
-        time.sleep(0.1)
-        self.send_eye_command(CommandType.AUTO_MOVEMENT_OFF)
-        time.sleep(0.1)
-        self.send_eye_command(CommandType.AUTO_BLINK_OFF)
-        time.sleep(0.1)
-        self.send_eye_command(CommandType.AUTO_PUPIL_OFF)
-        time.sleep(0.1)
 
     def initialize_pygame(self):
         """Initialize pygame mixer only once"""
@@ -327,10 +320,13 @@ class BundlePlayer:
 
         return False
 
-    def play_bundle(self, loop: bool = False):
+    def play_bundle(self, loop: bool = False, resume_auto: bool = True):
         try:
             while True:
                 print("\nStarting playback...")
+                if self.is_auto_movement:
+                    self.disable_auto_movement()
+
                 self.is_playing = True
                 self.recording_start_time = time.time()
 
@@ -356,6 +352,29 @@ class BundlePlayer:
             print(f"Error during playback: {e}")
         finally:
             self.is_playing = False
+            if resume_auto:
+                print("\nResuming auto animations...")
+                self.enable_auto_movement()
+
+    def disable_auto_movement(self):
+        self.send_eye_command(CommandType.JOYSTICK_CONNECTED)
+        time.sleep(0.1)
+        self.send_eye_command(CommandType.AUTO_MOVEMENT_OFF)
+        time.sleep(0.1)
+        self.send_eye_command(CommandType.AUTO_BLINK_OFF)
+        time.sleep(0.1)
+        self.send_eye_command(CommandType.AUTO_PUPIL_OFF)
+        self.is_auto_movement = False
+
+    def enable_auto_movement(self):
+        self.send_eye_command(CommandType.JOYSTICK_DISCONNECTED)
+        time.sleep(0.1)
+        self.send_eye_command(CommandType.AUTO_MOVEMENT_ON)
+        time.sleep(0.1)
+        self.send_eye_command(CommandType.AUTO_BLINK_ON)
+        time.sleep(0.1)
+        self.send_eye_command(CommandType.AUTO_PUPIL_ON)
+        self.is_auto_movement = True
 
     def cleanup(self):
         """Final cleanup when shutting down"""
@@ -419,6 +438,12 @@ def main():
     )
     parser.add_argument("--loop", action="store_true", help="Loop the animation")
     parser.add_argument(
+        "--resume-auto",
+        type=bool,
+        help="Resume automatid animations after playing",
+        default=True,
+    )
+    parser.add_argument(
         "--start-delay",
         type=int,
         default=0,
@@ -439,7 +464,7 @@ def main():
 
     if player.prepare_bundle(args.filename):
         try:
-            player.play_bundle(args.loop)
+            player.play_bundle(args.loop, args.resume_auto)
         except KeyboardInterrupt:
             print("\nPlayback interrupted by user")
         finally:

@@ -55,34 +55,40 @@ so that they reside in a predefined folder.
 This is the main contact point from outside of the head, creating the interface to be able to
 let the head run a prerecorded sound file, mouth script and eyes script.
 
-1. Copy the `editor/animationDaemon.py` file into `/boot/Pi_Eyes/` folder on the Raspberry Pi
-   together with: `animation_protocol.py`, `audio_player.py` and `bundlePlayer.py`.
-2. Copy the `mqtt.service` file into `/etc/systemd/system/` folder as well (you will need sudo)
-3. `sudo chmod +x /boot/Pi_Eyes/mqtt_service.py`
-4. `sudo nano /etc/systemd/system/mqtt.service` Edit the client name and check credentials and script folder.
-5. `sudo systemctl daemon-reload`
-6. `sudo systemctl enable mqtt.service`
-7. `sudo systemctl start mqtt.service`
-
-More on this service in the README-MQTT.md file.
+_Full installation instructions in the README-MQTT.md file.
+Installation script will be made as soon as I have time._
 
 ### Install the remote control
 
 1. Make sure you have Python installed on your remote machine
 2. Get the eyeRemote.py from this repo.
 
-### How to remote control and record
+#### How to remote control and record
 
 `python eyeRemote.py -i 192.168.1.2 -p 5005`
 Press the SHARE button on controller to start/stop recording.
 
-### How to playback
+#### How to playback
 
 `python eyeRemote.py -i 192.168.1.2 -p 5005 -r recording.csv`
 
-### How to control through MQTT
+### Install the Animatronics Studio
 
-See the separate file README-MQTT.md
+A simple GUI is created to be able to record eye and mouth movement in separate sessions, and to create package files containing both sound and animation instructions. These files are used by the MQTT service (see above).
+
+Installing and running it should be straight forward;
+
+1. Install the python scripts in the `editor` folder to somewhere in your PC
+2. Install the prerequisites `pip install pygame pydub pkinter numpy`
+3. Make sure you have a PS4 controller or a XBox controller attached to the PC
+4. Run main.py
+
+#### How to use the package files
+
+After creating a package file with sound and animation, you need to upload it
+to the configured script folder of the MQTT service on your raspberry pi (the head). See the MQTT installation instructions.
+
+After that, it it just to send a MQTT message as described in README-MQTT.md and the animation should play as intended.
 
 ### HW Documentation from Adafruit
 

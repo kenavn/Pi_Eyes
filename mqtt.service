@@ -1,11 +1,35 @@
 [Unit]
 Description=Skeleton MQTT Service
+After=network-online.target systemd-resolved.service
+Wants=network-online.target systemd-resolved.service
 
 [Service]
-ExecStart=/usr/bin/python3 /boot/Pi_Eyes/animationDaemon.py --mqtt-host mqtt.regins.no --robot-name head1 --mqtt-user x --mqtt-pass y --animations-dir /etc/anim
-Restart=always
-User=root
+Type=simple
+ExecStart=/usr/bin/python3 /boot/Pi_Eyes/animationDaemon.py --mqtt-host mqtt.regins.no --robot-name head1 --mqtt-user test --mqtt-pass test --animations-dir /etc/anim
+Restart=on-failure
+User=kenneth
+Group=kenneth
+
+# Network retry logic
+ExecStartPre=/bin/sh -c 'until host mqtt.regins.no; do sleep 2; done'
+
+# Runtime directory setup
+RuntimeDirectory=user/1000/pulse
+RuntimeDirectoryMode=0700
+
+# Environment setup
 Environment=PYTHONUNBUFFERED=1
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=HOME=/home/kenneth
+Environment=DISPLAY=:0
+Environment=PULSE_RUNTIME_PATH=/run/user/1000/pulse
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+
+SupplementaryGroups=audio pulse-access
+
+StartLimitBurst=5
+StartLimitIntervalSec=60
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

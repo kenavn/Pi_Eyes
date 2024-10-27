@@ -19,7 +19,7 @@ class PlayerStatus(Enum):
 
 
 class AnimationDaemon:
-    VERSION = "1.1.0"
+    VERSION = "1.2.0"
 
     def __init__(
         self,
@@ -232,6 +232,7 @@ class AnimationDaemon:
             filename = payload.get("file")
             delay_ms = payload.get("delay", 0)
             loop = payload.get("loop", False)
+            resume_auto = payload.get("resume-auto", True)
 
             if not filename:
                 print("Error: No filename provided in play command")
@@ -259,7 +260,7 @@ class AnimationDaemon:
                 self.publish_status()
 
                 self.player.start_delay_ms = delay_ms
-                self.player.play_bundle(loop)
+                self.player.play_bundle(loop, resume_auto)
 
                 self.status = PlayerStatus.IDLE
                 self.current_animation = None
