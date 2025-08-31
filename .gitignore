@@ -109,9 +109,10 @@ env.bak/
 venv.bak/
 .venv/
 
-# Spyder project settings
+# IDE
 .spyderproject
 .spyproject
+.idea/
 
 # Rope project settings
 .ropeproject
@@ -126,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Unique scripts
+deploy.sh
