@@ -79,7 +79,7 @@ A simple GUI is created to be able to record eye and mouth movement in separate 
 Installing and running it should be straight forward;
 
 1. Install the python scripts in the `editor` folder to somewhere in your PC
-2. Install the prerequisites `pip install pygame pydub pkinter numpy`
+2. Install the prerequisites in the `editor` folder; `pip install -r requirements.txt`
 3. Make sure you have a PS4 controller or a XBox controller attached to the PC
 4. Run main.py
 
