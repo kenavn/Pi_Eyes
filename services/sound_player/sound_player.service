@@ -1,0 +1,33 @@
+[Unit]
+Description=Pi_Eyes Sound Player Service
+After=network.target sound.target
+Wants=sound.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /boot/Pi_Eyes/sound_player.py \
+    --sounds-dir /boot/Pi_Eyes/sounds \
+    --random-dir /boot/Pi_Eyes/sounds/random \
+    --port 5008 \
+    --volume 50
+Restart=always
+User=sshpi
+Group=sshpi
+
+# Runtime directory setup
+RuntimeDirectory=user/1000/pulse
+RuntimeDirectoryMode=0700
+
+# Environment setup for audio
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/home/sshpi
+
+# Audio permissions
+SupplementaryGroups=audio
+
+StartLimitBurst=5
+StartLimitIntervalSec=60
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

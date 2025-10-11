@@ -128,5 +128,16 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Unique scripts
+# Deployment scripts
 deploy.sh
+services/*/deploy.sh
+
+# Sound files
+services/sound_player/sounds/*.mp3
+services/sound_player/sounds/*.wav
+services/sound_player/sounds/*.ogg
+services/sound_player/sounds/*.flac
+services/sound_player/sounds/random/*.mp3
+services/sound_player/sounds/random/*.wav
+services/sound_player/sounds/random/*.ogg
+services/sound_player/sounds/random/*.flac

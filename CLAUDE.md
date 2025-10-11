@@ -10,23 +10,27 @@ Pi_Eyes is a multi-generation fork of Adafruit's original animated snake eyes pr
 - **First Fork**: [kenavn/Pi_Eyes](https://github.com/kenavn/Pi_Eyes) - Added UDP remote control, PS4 controller support, recording/playback, MQTT animation system, and service-based architecture
 - **This Fork**: Extends the service architecture with thermal tracking using AMG8833 IR camera and performance optimizations
 
-The system displays animated eyes on small screens with remote UDP control, PS4 controller recording/playback, mouth servo control, thermal eye tracking, and MQTT-based animation management. It consists of four main components:
-
-1. **Eye Control System** (`eyes.py`) - Main eye animation engine using pi3d graphics
-2. **Mouth Control System** (`mouth.py`) - Servo-based mouth movement via UDP
-3. **Thermal Tracking System** (`thermal_tracker.py`) - AMG8833 thermal camera-based eye tracking
-4. **MQTT Animation Daemon** (`editor/animationDaemon.py`) - Orchestrates synchronized audio/animation playback
+The system centers around animated eyes displayed on small screens, with a modular architecture of auxiliary services that provide remote control, physical hardware integration, and automation capabilities. All services communicate via UDP or MQTT protocols and can run independently or together.
 
 ## Architecture
 
 ### Core Components
 - `eyes.py`: Main eye rendering engine with UDP control interface (port 5005)
-- `mouth.py`: Servo motor controller listening on UDP (port 5006) 
+- `mouth.py`: Servo motor controller listening on UDP (port 5006)
 - `thermal_tracker.py`: AMG8833 thermal camera tracker sending to eyes (port 5007 status)
-- `thermal_debug.py`: Calibration and debugging utilities for thermal tracking
 - `eyeRemote.py`: Remote control client for PS4 controller input and recording
 - `fbx2.c`: Low-level framebuffer graphics driver (C binary)
 - `gfxutil.py`: Graphics utilities and mathematical functions
+
+### Services
+- `services/sound_player/`: Audio playback service (UDP port 5008)
+  - Self-contained with deployment scripts, tests, and sound files
+  - See `services/sound_player/README.md` for detailed documentation
+
+### Testing & Debug Tools
+- `test_mouth.py` / `test_mouth_mouse.py`: Mouth servo testing utilities
+- `services/sound_player/test_sound_player.py`: Sound player service test client
+- `thermal_debug.py`: Thermal tracking calibration and debugging
 
 ### Animation System
 - `editor/`: Complete animation studio with GUI editor
@@ -57,6 +61,18 @@ python test_mouth.py
 
 # Test mouth with mouse input
 python test_mouth_mouse.py
+
+# Test sound player service (interactive mode)
+python services/sound_player/test_sound_player.py -i <pi_ip>
+
+# Play specific sound
+python services/sound_player/test_sound_player.py -i <pi_ip> --play sound.mp3
+
+# Play random sound
+python services/sound_player/test_sound_player.py -i <pi_ip> --random
+
+# Stop current sound
+python services/sound_player/test_sound_player.py -i <pi_ip> --stop
 ```
 
 ### Development
@@ -66,6 +82,9 @@ python eyes.py --radius 240
 
 # Run mouth servo controller
 python mouth.py --port 5006 --pin 22
+
+# Run sound player service
+python3 services/sound_player/sound_player.py --port 5008 --volume 1.0
 
 # Remote control with PS4 controller
 python eyeRemote.py -i <pi_ip> -p 5005
@@ -90,12 +109,16 @@ python3 thermal_debug.py --live-display
 
 ### Deployment
 ```bash
-# Deploy to Raspberry Pi (uses sshpass with credentials in script)
+# Deploy all services to Raspberry Pi (uses sshpass with credentials in script)
 ./deploy.sh
 
-# Deployment script copies eyes.py and thermal_tracker.py to Pi
-# Automatically restarts thermal_tracker service if enabled
-# Reboots Pi to restart eyes.py
+# Deploy only sound player service
+cd services/sound_player && ./deploy.sh
+
+# Deployment script copies all necessary files to Pi
+# Automatically restarts services if enabled
+# Creates required directories
+# Note: Main deploy.sh reboots Pi to restart eyes.py
 ```
 
 ### Service Management
@@ -114,6 +137,11 @@ sudo systemctl status mqtt.service
 sudo systemctl enable thermal_tracker.service
 sudo systemctl start thermal_tracker.service
 sudo systemctl status thermal_tracker.service
+
+# Install and manage sound player service
+sudo systemctl enable sound_player.service
+sudo systemctl start sound_player.service
+sudo systemctl status sound_player.service
 ```
 
 ## Development Notes
@@ -123,10 +151,23 @@ sudo systemctl status thermal_tracker.service
 - Control packet format includes joystick X/Y, blink states, and auto-mode flags
 - Graphics rendered using pi3d with OpenGL ES on Raspberry Pi
 
-### Mouth Control Protocol  
+### Mouth Control Protocol
 - Mouth servo listens on UDP port 5006 by default
 - Position values range 0-255, mapped to servo PWM signals
 - Requires pigpio daemon (`sudo pigpiod`) for hardware PWM
+
+### Sound Player Protocol
+- Sound player listens on UDP port 5008 by default
+- Command format:
+  - `0x60` + filename (null-terminated string) - Play specific sound file
+  - `0x61` - Play random sound from random directory
+  - `0x62` - Stop current playback
+  - `0x63` + volume byte (0-100) - Set volume
+- Supports MP3, WAV, OGG, FLAC formats
+- Plays through Raspberry Pi audio jack (3.5mm or HDMI)
+- Non-blocking playback allows service to run alongside other services
+- Sound files located in `/boot/Pi_Eyes/sounds/` directory
+- Random sounds located in `/boot/Pi_Eyes/sounds/random/` directory
 
 ### Thermal Tracking Protocol
 - Thermal tracker sends eye position commands to port 5005 (eyes)

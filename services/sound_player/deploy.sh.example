@@ -1,0 +1,134 @@
+#!/bin/bash
+
+# Sound Player Service Deployment Script (Example Template)
+# Copy this to deploy.sh and update with your Pi's IP address and password
+#
+# This script will:
+# - Install pygame if not already installed
+# - Configure audio output (3.5mm jack by default)
+# - Deploy the sound_player service
+# - Copy any local sound files
+# - Enable and start the service
+
+PI_HOST="sshpi@192.168.1.100"  # Update with your Pi's IP
+PI_PASSWORD="your-password-here"  # Update with your Pi's password
+PI_DEST="/boot/Pi_Eyes"
+AUDIO_OUTPUT=1  # 1=3.5mm jack, 0=HDMI
+
+echo "Deploying Sound Player service to $PI_HOST..."
+
+# Copy files to home directory first
+echo "Copying sound_player.py..."
+sshpass -p "$PI_PASSWORD" scp ./sound_player.py "$PI_HOST:sound_player.py"
+
+echo "Copying sound_player.service..."
+sshpass -p "$PI_PASSWORD" scp ./sound_player.service "$PI_HOST:sound_player.service"
+
+# Copy sound files if any exist locally
+echo "Copying sound files..."
+if [ -d "./sounds" ]; then
+    # Count sound files
+    SOUND_COUNT=$(find ./sounds -type f \( -name "*.mp3" -o -name "*.wav" -o -name "*.ogg" -o -name "*.flac" \) | wc -l)
+
+    if [ "$SOUND_COUNT" -gt 0 ]; then
+        echo "Found $SOUND_COUNT sound file(s) to copy..."
+
+        # Copy main sounds directory (preserving structure, excluding .gitkeep and README)
+        sshpass -p "$PI_PASSWORD" scp -r ./sounds "$PI_HOST:sounds_tmp"
+
+        echo "Copied sound files to Pi"
+    else
+        echo "No sound files found locally (*.mp3, *.wav, *.ogg, *.flac)"
+    fi
+else
+    echo "No sounds directory found locally"
+fi
+
+# Install dependencies and set up service
+echo "Installing dependencies and service on Pi..."
+sshpass -p "$PI_PASSWORD" ssh "$PI_HOST" << 'EOF'
+    # Install pygame if not already installed
+    if ! python3 -c "import pygame" 2>/dev/null; then
+        echo "Installing pygame..."
+        sudo apt-get update
+        sudo apt-get install -y python3-pygame
+    else
+        echo "pygame already installed"
+    fi
+
+    # Set audio output to 3.5mm jack (change to 0 for HDMI)
+    echo "Configuring audio output to 3.5mm jack..."
+    sudo raspi-config nonint do_audio 1
+
+    # Move Python script to destination
+    sudo mv /home/sshpi/sound_player.py /boot/Pi_Eyes/sound_player.py
+    sudo chmod +x /boot/Pi_Eyes/sound_player.py
+
+    # Install systemd service
+    sudo mv /home/sshpi/sound_player.service /etc/systemd/system/sound_player.service
+    sudo chmod 644 /etc/systemd/system/sound_player.service
+
+    # Create sound directories if they don't exist
+    sudo mkdir -p /boot/Pi_Eyes/sounds/random
+
+    # Move sound files if they were copied
+    if [ -d "/home/sshpi/sounds_tmp" ]; then
+        echo "Installing sound files..."
+
+        # Copy audio files from sounds_tmp to /boot/Pi_Eyes/sounds/
+        if [ -d "/home/sshpi/sounds_tmp" ]; then
+            # Copy main directory audio files
+            sudo find /home/sshpi/sounds_tmp -maxdepth 1 -type f \( -name "*.mp3" -o -name "*.wav" -o -name "*.ogg" -o -name "*.flac" \) -exec cp {} /boot/Pi_Eyes/sounds/ \; 2>/dev/null || true
+
+            # Copy random directory audio files
+            if [ -d "/home/sshpi/sounds_tmp/random" ]; then
+                sudo find /home/sshpi/sounds_tmp/random -type f \( -name "*.mp3" -o -name "*.wav" -o -name "*.ogg" -o -name "*.flac" \) -exec cp {} /boot/Pi_Eyes/sounds/random/ \; 2>/dev/null || true
+            fi
+
+            # Clean up temp directory
+            rm -rf /home/sshpi/sounds_tmp
+
+            echo "Sound files installed"
+        fi
+    fi
+
+    # Reload systemd and restart service
+    sudo systemctl daemon-reload
+
+    if systemctl is-enabled sound_player.service >/dev/null 2>&1; then
+        echo "Restarting sound_player service..."
+        sudo systemctl restart sound_player.service
+    else
+        echo "Enabling and starting sound_player service..."
+        sudo systemctl enable sound_player.service
+        sudo systemctl start sound_player.service
+    fi
+
+    sleep 1
+    sudo systemctl status sound_player.service --no-pager
+EOF
+
+echo ""
+echo "=========================================="
+echo "Deployment complete!"
+echo "=========================================="
+echo ""
+
+# Check how many files were copied
+if [ "$SOUND_COUNT" -gt 0 ]; then
+    echo "✓ Deployed $SOUND_COUNT sound file(s)"
+fi
+
+echo ""
+echo "Service Management:"
+echo "  Enable on boot:  ssh $PI_HOST 'sudo systemctl enable sound_player.service'"
+echo "  Check status:    ssh $PI_HOST 'sudo systemctl status sound_player.service'"
+echo "  View logs:       ssh $PI_HOST 'sudo journalctl -u sound_player.service -f'"
+echo ""
+echo "Testing:"
+echo "  python test_sound_player.py -i ${PI_HOST%@*} --random"
+echo "  python test_sound_player.py -i ${PI_HOST%@*} --play <filename>"
+echo ""
+echo "To add more sounds later:"
+echo "  scp mysound.mp3 $PI_HOST:/boot/Pi_Eyes/sounds/"
+echo "  scp random*.mp3 $PI_HOST:/boot/Pi_Eyes/sounds/random/"
