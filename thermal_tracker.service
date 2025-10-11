@@ -1,0 +1,35 @@
+[Unit]
+Description=Pi_Eyes Thermal Eye Tracker
+After=network-online.target systemd-resolved.service
+Wants=network-online.target systemd-resolved.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /boot/Pi_Eyes/thermal_tracker.py \
+    --eye-host 127.0.0.1 \
+    --eye-port 5005 \
+    --thermal-port 5007 \
+    --rate 5.0 \
+    --sensitivity 5.0
+    --position-threshold 0.05 \
+    --smoothing 0.7
+Restart=on-failure
+User=sshpi
+Group=sshpi
+
+# Network retry logic
+ExecStartPre=/bin/sh -c 'until ping -c1 127.0.0.1; do sleep 2; done'
+
+# Environment setup
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/home/sshpi
+
+# I2C permissions for thermal sensor
+SupplementaryGroups=i2c gpio
+
+StartLimitBurst=5
+StartLimitIntervalSec=60
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# Pi_Eyes Deployment Script (Example Template)
+# Copy this to deploy.sh and update with your Pi's IP address and password
+
+PI_HOST="sshpi@192.168.1.100"  # Update with your Pi's IP
+PI_PASSWORD="your-password-here"  # Update with your Pi's password
+PI_DEST="/boot/Pi_Eyes"
+
+echo "Deploying Pi_Eyes updates to $PI_HOST..."
+
+# Copy files to home directory first
+echo "Copying eyes.py..."
+sshpass -p "$PI_PASSWORD" scp ./eyes.py "$PI_HOST:eyes.py"
+
+echo "Copying thermal_tracker.py..."
+sshpass -p "$PI_PASSWORD" scp ./thermal_tracker.py "$PI_HOST:thermal_tracker.py"
+
+echo "Copying amg8833_simple.py..."
+sshpass -p "$PI_PASSWORD" scp ./amg8833_simple.py "$PI_HOST:amg8833_simple.py"
+
+# Move files to destination and restart services
+echo "Moving files and restarting services..."
+sshpass -p "$PI_PASSWORD" ssh "$PI_HOST" << 'EOF'
+    # Move files to /boot/Pi_Eyes
+    sudo mv /home/sshpi/eyes.py /boot/Pi_Eyes/eyes.py
+    sudo mv /home/sshpi/thermal_tracker.py /boot/Pi_Eyes/thermal_tracker.py
+    sudo mv /home/sshpi/amg8833_simple.py /boot/Pi_Eyes/amg8833_simple.py
+
+    # Restart thermal tracker service if it exists
+    if systemctl is-enabled thermal_tracker.service >/dev/null 2>&1; then
+        echo "Restarting thermal_tracker service..."
+        sudo systemctl restart thermal_tracker.service
+        sleep 2
+        sudo systemctl status thermal_tracker.service --no-pager
+    fi
+
+    # Reboot to restart eyes.py
+    echo "Rebooting in 5 seconds..."
+    sleep 5
+    sudo reboot now
+EOF
+
+echo "Deployment complete!"
