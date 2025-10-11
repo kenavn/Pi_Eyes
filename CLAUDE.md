@@ -17,20 +17,22 @@ The system centers around animated eyes displayed on small screens, with a modul
 ### Core Components
 - `eyes.py`: Main eye rendering engine with UDP control interface (port 5005)
 - `mouth.py`: Servo motor controller listening on UDP (port 5006)
-- `thermal_tracker.py`: AMG8833 thermal camera tracker sending to eyes (port 5007 status)
 - `eyeRemote.py`: Remote control client for PS4 controller input and recording
 - `fbx2.c`: Low-level framebuffer graphics driver (C binary)
 - `gfxutil.py`: Graphics utilities and mathematical functions
 
 ### Services
+
+Each service is self-contained with its own deployment scripts, tests, documentation, and dependencies. Service README files contain complete usage instructions, testing procedures, troubleshooting guides, and protocol documentation.
+
 - `services/sound_player/`: Audio playback service (UDP port 5008)
-  - Self-contained with deployment scripts, tests, and sound files
-  - See `services/sound_player/README.md` for detailed documentation
+  - See `services/sound_player/README.md` for full documentation
+- `services/thermal_tracker/`: AMG8833 thermal camera eye tracking service (UDP port 5007 status)
+  - See `services/thermal_tracker/README.md` for full documentation
 
 ### Testing & Debug Tools
 - `test_mouth.py` / `test_mouth_mouse.py`: Mouth servo testing utilities
-- `services/sound_player/test_sound_player.py`: Sound player service test client
-- `thermal_debug.py`: Thermal tracking calibration and debugging
+- Each service includes its own test utilities (see service README files)
 
 ### Animation System
 - `editor/`: Complete animation studio with GUI editor
@@ -62,17 +64,7 @@ python test_mouth.py
 # Test mouth with mouse input
 python test_mouth_mouse.py
 
-# Test sound player service (interactive mode)
-python services/sound_player/test_sound_player.py -i <pi_ip>
-
-# Play specific sound
-python services/sound_player/test_sound_player.py -i <pi_ip> --play sound.mp3
-
-# Play random sound
-python services/sound_player/test_sound_player.py -i <pi_ip> --random
-
-# Stop current sound
-python services/sound_player/test_sound_player.py -i <pi_ip> --stop
+# For service-specific testing (sound_player, thermal_tracker), see the respective service README files
 ```
 
 ### Development
@@ -82,9 +74,6 @@ python eyes.py --radius 240
 
 # Run mouth servo controller
 python mouth.py --port 5006 --pin 22
-
-# Run sound player service
-python3 services/sound_player/sound_player.py --port 5008 --volume 1.0
 
 # Remote control with PS4 controller
 python eyeRemote.py -i <pi_ip> -p 5005
@@ -98,13 +87,7 @@ python eyeRemote.py -i <pi_ip> -p 5005 -r recording.csv
 # Run animation studio GUI
 cd editor && python main.py
 
-# Run thermal tracking (requires AMG8833 sensor) - use python3 on Pi
-python3 thermal_tracker.py --eye-host <pi_ip> --sensitivity 5.0 --debug
-
-# Debug and calibrate thermal tracking - use python3 on Pi
-python3 thermal_debug.py --test-service
-python3 thermal_debug.py --calibrate
-python3 thermal_debug.py --live-display
+# For service-specific development commands, see the respective service README files
 ```
 
 ### Deployment
@@ -114,6 +97,9 @@ python3 thermal_debug.py --live-display
 
 # Deploy only sound player service
 cd services/sound_player && ./deploy.sh
+
+# Deploy only thermal tracker service
+cd services/thermal_tracker && ./deploy.sh
 
 # Deployment script copies all necessary files to Pi
 # Automatically restarts services if enabled
@@ -156,27 +142,18 @@ sudo systemctl status sound_player.service
 - Position values range 0-255, mapped to servo PWM signals
 - Requires pigpio daemon (`sudo pigpiod`) for hardware PWM
 
-### Sound Player Protocol
-- Sound player listens on UDP port 5008 by default
-- Command format:
-  - `0x60` + filename (null-terminated string) - Play specific sound file
-  - `0x61` - Play random sound from random directory
-  - `0x62` - Stop current playback
-  - `0x63` + volume byte (0-100) - Set volume
-- Supports MP3, WAV, OGG, FLAC formats
-- Plays through Raspberry Pi audio jack (3.5mm or HDMI)
-- Non-blocking playback allows service to run alongside other services
-- Sound files located in `/boot/Pi_Eyes/sounds/` directory
-- Random sounds located in `/boot/Pi_Eyes/sounds/random/` directory
+### Service Protocols
 
-### Thermal Tracking Protocol
-- Thermal tracker sends eye position commands to port 5005 (eyes)
-- Status/configuration interface on UDP port 5007
-- Uses temperature-weighted centroid algorithm for gaze direction
-- Requires Adafruit AMG8833 thermal camera via I2C
-- Command format: `0x20` + x_byte + y_byte (same as eye controller)
-- Integrates with eye controller by sending `joystick_connected`/`joystick_disconnected` messages
-- See [THERMAL_INSTALLATION.md](THERMAL_INSTALLATION.md) for detailed setup, tuning, and troubleshooting
+For detailed protocol documentation, testing procedures, and troubleshooting, see each service's README file.
+
+**Sound Player** (UDP port 5008):
+- Plays audio files through Raspberry Pi audio jack
+- See [services/sound_player/README.md](services/sound_player/README.md)
+
+**Thermal Tracker** (UDP port 5007 status):
+- Automatic eye tracking using AMG8833 thermal camera
+- Sends eye position commands to port 5005
+- See [services/thermal_tracker/README.md](services/thermal_tracker/README.md)
 
 ### Animation Package Format
 - `.skelanim` files contain synchronized audio and animation data
@@ -184,12 +161,16 @@ sudo systemctl status sound_player.service
 - MQTT interface allows remote triggering of animation playback
 
 ### Dependencies
+
+**Core System:**
 - **Python Version**: Python 3.7+ (Raspberry Pi OS has Python 2.7 as `python` and Python 3.7+ as `python3`)
-- **Important**: Use `python3` for all thermal tracking commands on the Pi
 - Python packages: `pi3d`, `pygame`, `paho-mqtt`, `pigpio`, `svg.path`, `pydub`
-- Thermal tracking: `adafruit-circuitpython-amg88xx`, `board`, `busio`
-- System: `pigpiod` daemon for servo control, I2C enabled for thermal sensor
-- Hardware: Adafruit Snake Eyes Bonnet or compatible Pi display setup, AMG8833 thermal camera
+- System: `pigpiod` daemon for servo control
+- Hardware: Adafruit Snake Eyes Bonnet or compatible Pi display setup
+
+**Service-Specific Dependencies:**
+- Each service has its own dependencies documented in its README file
+- Services manage their own deployment and dependency installation
 
 ### Graphics Pipeline
 - SVG eye models parsed and rendered in real-time

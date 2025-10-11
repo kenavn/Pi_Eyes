@@ -1,8 +1,29 @@
-# Thermal Eye Tracking Installation Guide
+# Thermal Eye Tracker Service
 
-## Quick Start
+Automatic eye tracking service for Pi_Eyes using the Adafruit AMG8833 IR thermal camera. Tracks heat sources (people, faces, etc.) and automatically directs the robot's gaze toward them.
 
-The thermal tracking system uses an Adafruit AMG8833 thermal camera to automatically direct the robot's gaze toward heat sources (people, faces, etc.).
+## Features
+
+- **Thermal Tracking**: Automatically directs eyes toward heat sources
+- **UDP Control**: Communicates with eyes service on port 5005
+- **Status Interface**: UDP port 5007 for configuration and monitoring
+- **Smooth Motion**: Configurable smoothing and position thresholds
+- **Auto-Fallback**: Seamlessly hands control back to autonomous eye movement
+- **Systemd Service**: Auto-start on boot with automatic restart
+- **Debug Tools**: Testing and calibration utilities included
+
+## Directory Structure
+
+```
+thermal_tracker/
+├── thermal_tracker.py           # Main service daemon
+├── test_thermal_tracker.py      # Test/debug/calibration client
+├── amg8833_simple.py           # AMG8833 sensor interface
+├── thermal_tracker.service      # Systemd service file
+├── deploy.sh                    # Deployment script (gitignored)
+├── deploy.sh.example            # Deployment template
+└── README.md                    # This file
+```
 
 ## Prerequisites
 
@@ -16,59 +37,120 @@ The thermal tracking system uses an Adafruit AMG8833 thermal camera to automatic
 
 **Note**: Always use `python3` (not `python`) for thermal tracking commands on the Pi.
 
-## Installation on Raspberry Pi
+## Installation
 
-1. **Copy files to Pi**:
-   ```bash
-   scp thermal_tracker.py pi@your-pi:/boot/Pi_Eyes/
-   scp thermal_debug.py pi@your-pi:/boot/Pi_Eyes/
-   scp amg8833_simple.py pi@your-pi:/boot/Pi_Eyes/
-   scp thermal_tracker.service pi@your-pi:~/
-   ```
+### 1. Install Dependencies on Raspberry Pi
 
-2. **Install service**:
-   ```bash
-   sudo mv ~/thermal_tracker.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   ```
+Before deploying, ensure I2C and smbus are configured on your Pi:
 
-3. **Enable automatic startup on boot**:
-   ```bash
-   sudo systemctl enable thermal_tracker.service
-   sudo systemctl start thermal_tracker.service
-   ```
+```bash
+# SSH into your Pi
+ssh sshpi@<pi_ip>
 
-4. **Check status**:
-   ```bash
-   sudo systemctl status thermal_tracker.service
-   ```
+# Enable I2C interface
+sudo raspi-config
+# > Interface Options > I2C > Enable
 
-5. **View service logs** (for troubleshooting):
-   ```bash
-   journalctl -u thermal_tracker.service -f
-   ```
+# Install smbus for Python 3
+sudo apt-get update
+sudo apt-get install -y python3-smbus
+
+# Verify installation
+python3 -c "import smbus; print('smbus installed successfully')"
+
+# Add user to i2c and gpio groups
+sudo usermod -a -G i2c,gpio sshpi
+```
+
+### 2. Deploy to Raspberry Pi
+
+```bash
+# Copy deploy.sh.example to deploy.sh and update credentials
+cp deploy.sh.example deploy.sh
+nano deploy.sh  # Edit PI_HOST and PI_PASSWORD
+
+# Deploy the service
+./deploy.sh
+```
+
+The deployment script will:
+- Copy service files to the Pi
+- Install systemd service
+- Enable I2C if not already enabled
+- Add user to i2c and gpio groups
+- Enable and start the service
 
 ## Usage
 
-### Manual Operation
-```bash
-# Run with debug output (use python3)
-python3 thermal_tracker.py --debug --sensitivity 7.5
+### Testing from Development Machine
 
-# Test and calibrate (use python3)
-python3 thermal_debug.py --test-service
-python3 thermal_debug.py --calibrate
-python3 thermal_debug.py --live-display
+The `test_thermal_tracker.py` utility provides debugging and calibration tools:
+
+#### Test Service Connection
+```bash
+python3 test_thermal_tracker.py --test-service
+```
+
+#### Live Thermal Display
+```bash
+python3 test_thermal_tracker.py --live-display
+```
+
+#### Interactive Calibration
+```bash
+python3 test_thermal_tracker.py --calibrate
+```
+
+#### Set Sensitivity
+```bash
+python3 test_thermal_tracker.py --sensitivity 7.5
+```
+
+#### Test Eye Commands
+```bash
+python3 test_thermal_tracker.py --test-eyes
 ```
 
 ### Service Management
+
 ```bash
-# Start/stop service
-sudo systemctl start thermal_tracker.service
-sudo systemctl stop thermal_tracker.service
+# Check status
+ssh <pi_ip> 'sudo systemctl status thermal_tracker.service'
+
+# Start service
+ssh <pi_ip> 'sudo systemctl start thermal_tracker.service'
+
+# Stop service
+ssh <pi_ip> 'sudo systemctl stop thermal_tracker.service'
+
+# Restart service
+ssh <pi_ip> 'sudo systemctl restart thermal_tracker.service'
 
 # View logs
-journalctl -u thermal_tracker.service -f
+ssh <pi_ip> 'sudo journalctl -u thermal_tracker.service -f'
+
+# Enable on boot
+ssh <pi_ip> 'sudo systemctl enable thermal_tracker.service'
+
+# Disable on boot
+ssh <pi_ip> 'sudo systemctl disable thermal_tracker.service'
+```
+
+### Running Manually (Development)
+
+```bash
+# Run on Pi with debug output
+python3 thermal_tracker.py --debug --sensitivity 7.5
+
+# Custom parameters
+python3 thermal_tracker.py \
+    --eye-host 127.0.0.1 \
+    --eye-port 5005 \
+    --thermal-port 5007 \
+    --rate 5.0 \
+    --sensitivity 5.0 \
+    --position-threshold 0.05 \
+    --smoothing 0.7
 ```
 
 ## Configuration
@@ -214,3 +296,69 @@ The thermal tracking system integrates with Pi_Eyes' built-in autonomous movemen
    - Debug output: `Sensor data unavailable, using auto movement`
 
 **This design properly hands control between thermal tracking and the original Pi_Eyes autonomous behavior**, ensuring smooth transitions and natural movement when not tracking.
+
+## UDP Protocol
+
+The thermal tracker communicates using two UDP interfaces:
+
+### Eye Control (Port 5005)
+
+Sends commands to the eye controller:
+
+| Command | Byte | Payload | Description |
+|---------|------|---------|-------------|
+| Controller Connected | `0x01` | none | Disable autonomous movement |
+| Controller Disconnected | `0x00` | none | Enable autonomous movement |
+| Eye Position | `0x20` | 2 bytes (x, y) | Set eye position (0-255 range) |
+
+### Status Interface (Port 5007)
+
+Receives status requests and configuration commands:
+
+```python
+import socket
+import json
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+# Get status
+sock.sendto(b'status', ('127.0.0.1', 5007))
+data, addr = sock.recvfrom(1024)
+status = json.loads(data.decode('utf-8'))
+print(status)
+
+# Set sensitivity
+command = b'sensitivity=7.5'
+sock.sendto(command, ('127.0.0.1', 5007))
+```
+
+## Integration with Other Services
+
+The thermal tracker runs independently and integrates with:
+
+- **Eye Controller** (`eyes.py`): Sends position commands and controller status
+- **MQTT Animation Daemon**: Can be disabled during thermal tracking
+- **Sound Player**: Can trigger sounds based on tracking events (future enhancement)
+- **Custom Scripts**: Any service that can send UDP packets to port 5007
+
+## Development
+
+### File Locations on Pi
+
+- Service Script: `/boot/Pi_Eyes/thermal_tracker.py`
+- Sensor Interface: `/boot/Pi_Eyes/amg8833_simple.py`
+- Systemd Unit: `/etc/systemd/system/thermal_tracker.service`
+
+### Dependencies
+
+- Python 3.7+
+- smbus (I2C communication)
+- Standard library: socket, struct, threading, json, argparse
+
+### Version History
+
+- **v1.0.0** - Initial release with UDP control, smoothing, and systemd integration
+
+## License
+
+Follows Pi_Eyes project license (see root LICENSE file).

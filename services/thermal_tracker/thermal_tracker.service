@@ -10,7 +10,7 @@ ExecStart=/usr/bin/python3 /boot/Pi_Eyes/thermal_tracker.py \
     --eye-port 5005 \
     --thermal-port 5007 \
     --rate 5.0 \
-    --sensitivity 5.0
+    --sensitivity 5.0 \
     --position-threshold 0.05 \
     --smoothing 0.7
 Restart=on-failure

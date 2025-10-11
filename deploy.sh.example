@@ -1,44 +1,57 @@
 #!/bin/bash
 
-# Pi_Eyes Deployment Script (Example Template)
+# Pi_Eyes Core Deployment Script (Example Template)
 # Copy this to deploy.sh and update with your Pi's IP address and password
+#
+# This script deploys the core Pi_Eyes system (eyes.py)
+# For service-specific deployment, use the deploy scripts in services/ directories
 
 PI_HOST="sshpi@192.168.1.100"  # Update with your Pi's IP
 PI_PASSWORD="your-password-here"  # Update with your Pi's password
 PI_DEST="/boot/Pi_Eyes"
 
-echo "Deploying Pi_Eyes updates to $PI_HOST..."
+echo "=========================================="
+echo "Pi_Eyes Core Deployment"
+echo "=========================================="
+echo "Deploying to: $PI_HOST"
+echo "Destination: $PI_DEST"
+echo ""
 
-# Copy files to home directory first
+# Copy core Python files
 echo "Copying eyes.py..."
 sshpass -p "$PI_PASSWORD" scp ./eyes.py "$PI_HOST:eyes.py"
 
-echo "Copying thermal_tracker.py..."
-sshpass -p "$PI_PASSWORD" scp ./thermal_tracker.py "$PI_HOST:thermal_tracker.py"
+# Install and configure on Pi
+echo ""
+echo "Installing on Raspberry Pi..."
+sshpass -p "$PI_PASSWORD" ssh "$PI_HOST" << EOF
+    # Move files to destination
+    echo "Moving eyes.py to $PI_DEST..."
+    sudo mv /home/sshpi/eyes.py $PI_DEST/eyes.py
+    sudo chmod +x $PI_DEST/eyes.py
 
-echo "Copying amg8833_simple.py..."
-sshpass -p "$PI_PASSWORD" scp ./amg8833_simple.py "$PI_HOST:amg8833_simple.py"
-
-# Move files to destination and restart services
-echo "Moving files and restarting services..."
-sshpass -p "$PI_PASSWORD" ssh "$PI_HOST" << 'EOF'
-    # Move files to /boot/Pi_Eyes
-    sudo mv /home/sshpi/eyes.py /boot/Pi_Eyes/eyes.py
-    sudo mv /home/sshpi/thermal_tracker.py /boot/Pi_Eyes/thermal_tracker.py
-    sudo mv /home/sshpi/amg8833_simple.py /boot/Pi_Eyes/amg8833_simple.py
-
-    # Restart thermal tracker service if it exists
-    if systemctl is-enabled thermal_tracker.service >/dev/null 2>&1; then
-        echo "Restarting thermal_tracker service..."
-        sudo systemctl restart thermal_tracker.service
-        sleep 2
-        sudo systemctl status thermal_tracker.service --no-pager
-    fi
-
-    # Reboot to restart eyes.py
-    echo "Rebooting in 5 seconds..."
-    sleep 5
-    sudo reboot now
+    echo ""
+    echo "Files deployed successfully!"
 EOF
 
-echo "Deployment complete!"
+echo ""
+echo "=========================================="
+echo "Deployment Complete!"
+echo "=========================================="
+echo ""
+echo "The Pi will reboot in 10 seconds to apply changes."
+echo "Press Ctrl+C to cancel the reboot."
+echo ""
+
+# Countdown before reboot
+for i in {10..1}; do
+    echo -ne "Rebooting in $i seconds...\r"
+    sleep 1
+done
+
+echo ""
+echo "Rebooting Pi..."
+sshpass -p "$PI_PASSWORD" ssh "$PI_HOST" "sudo reboot now"
+
+echo ""
+echo "Reboot initiated. Wait ~30 seconds for Pi to restart."
