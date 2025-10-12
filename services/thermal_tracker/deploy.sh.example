@@ -29,6 +29,15 @@ sshpass -p "$PI_PASSWORD" scp ./test_thermal_tracker.py "$PI_HOST:test_thermal_t
 echo "Copying thermal_tracker.service..."
 sshpass -p "$PI_PASSWORD" scp ./thermal_tracker.service "$PI_HOST:thermal_tracker.service"
 
+echo "Copying config file..."
+if [ -f ./config.ini ]; then
+    sshpass -p "$PI_PASSWORD" scp ./config.ini "$PI_HOST:thermal_tracker_config.ini"
+    echo "Config file found and copied"
+else
+    echo "Warning: config.ini not found, using example"
+    sshpass -p "$PI_PASSWORD" scp ./config.ini.example "$PI_HOST:thermal_tracker_config.ini"
+fi
+
 # Install dependencies and set up service
 echo "Installing dependencies and service on Pi..."
 sshpass -p "$PI_PASSWORD" ssh "$PI_HOST" << 'EOF'
@@ -62,6 +71,13 @@ sshpass -p "$PI_PASSWORD" ssh "$PI_HOST" << 'EOF'
 
     sudo mv /home/sshpi/test_thermal_tracker.py /boot/Pi_Eyes/test_thermal_tracker.py
     sudo chmod +x /boot/Pi_Eyes/test_thermal_tracker.py
+
+    # Move config file to destination
+    if [ -f /home/sshpi/thermal_tracker_config.ini ]; then
+        sudo mv /home/sshpi/thermal_tracker_config.ini /boot/Pi_Eyes/thermal_tracker_config.ini
+        sudo chmod 644 /boot/Pi_Eyes/thermal_tracker_config.ini
+        echo "Config file deployed to /boot/Pi_Eyes/thermal_tracker_config.ini"
+    fi
 
     # Install systemd service
     sudo mv /home/sshpi/thermal_tracker.service /etc/systemd/system/thermal_tracker.service

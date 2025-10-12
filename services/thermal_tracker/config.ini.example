@@ -37,7 +37,8 @@ smoothing = 0.7
 # Decrease (3.0-4.0) if tracker fails to detect people
 # Person's face: 28-35°C = magnitude 8-15
 # Room temp objects: 22-25°C = magnitude 2-5
-detection_threshold = 3.0
+# Default: 5.0 (recommended starting point)
+detection_threshold = 5.0
 
 [features]
 # Enable sound trigger when detection starts

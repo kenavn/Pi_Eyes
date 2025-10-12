@@ -63,7 +63,17 @@ python3 -c "import smbus; print('smbus installed successfully')"
 sudo usermod -a -G i2c,gpio sshpi
 ```
 
-### 2. Deploy to Raspberry Pi
+### 2. Configure Your Settings
+
+Before deploying, create your config.ini from the example:
+
+```bash
+# Copy and edit the config file
+cp config.ini.example config.ini
+nano config.ini  # Edit your settings (detection_threshold, sound, etc.)
+```
+
+### 3. Deploy to Raspberry Pi
 
 ```bash
 # Copy deploy.sh.example to deploy.sh and update credentials
@@ -75,11 +85,14 @@ nano deploy.sh  # Edit PI_HOST and PI_PASSWORD
 ```
 
 The deployment script will:
-- Copy service files to the Pi
+- Copy service files to the Pi (including config.ini)
+- Deploy config to `/boot/Pi_Eyes/thermal_tracker_config.ini`
 - Install systemd service
 - Enable I2C if not already enabled
 - Add user to i2c and gpio groups
-- Enable and start the service
+- Enable and start (or restart) the service
+
+**Important**: The service will automatically restart on deploy, applying your new config settings!
 
 ## Usage
 

@@ -272,9 +272,13 @@ class ThermalTracker:
     def sensor_loop(self):
         """Main sensor reading and eye tracking loop."""
         print(f"Starting thermal tracking at {self.update_rate} Hz")
-        
+
+        # Send initial disconnect to enable autonomous eye movement
+        # This ensures eyes use auto movement when tracker starts with no detection
+        self.disconnect_controller()
+
         sleep_time = 1.0 / self.update_rate
-        
+
         while self.running:
             start_time = time.time()
             
@@ -431,10 +435,10 @@ class ThermalTracker:
         print("Stopping thermal tracking service...")
         self.running = False
 
-        # Ensure auto movement is restored
-        if self.tracking_active:
-            self.disconnect_controller()
-            self.tracking_active = False
+        # Always send disconnect to ensure auto movement is restored
+        # This is crucial when service is redeployed/restarted
+        self.disconnect_controller()
+        self.tracking_active = False
 
         if self.sensor_thread:
             self.sensor_thread.join(timeout=2.0)
@@ -594,6 +598,27 @@ def main():
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+
+    # Log configuration values at startup
+    print("=" * 50)
+    print("Thermal Tracker Configuration:")
+    print("=" * 50)
+    print(f"Eye Host:              {eye_host}:{eye_port}")
+    print(f"Thermal Port:          {thermal_port}")
+    print(f"Update Rate:           {rate} Hz")
+    print(f"Sensitivity:           {sensitivity}")
+    print(f"Position Threshold:    {position_threshold}")
+    print(f"Smoothing:             {smoothing}")
+    print(f"Detection Threshold:   {detection_threshold}  <-- IMPORTANT")
+    print(f"Sound Enabled:         {enable_detection_sound}")
+    if enable_detection_sound:
+        if detection_sound_file:
+            print(f"Sound File:            {detection_sound_file}")
+        else:
+            print(f"Sound File:            <random>")
+    print(f"Debug Mode:            {debug}")
+    print("=" * 50)
+    print()
 
     # Create and start tracker
     global tracker
