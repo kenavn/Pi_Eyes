@@ -1,0 +1,48 @@
+# Thermal Tracker Configuration
+# Copy this file to config.ini and edit as needed
+# On Raspberry Pi, copy to: /boot/Pi_Eyes/thermal_tracker_config.ini
+
+[network]
+# IP address and port of the eye controller service
+eye_host = 127.0.0.1
+eye_port = 5005
+
+# UDP port for thermal tracker status/config server
+thermal_port = 5007
+
+# IP address and port of the sound player service
+sound_host = 127.0.0.1
+sound_port = 5008
+
+[tracking]
+# Update rate in Hz (1.0-20.0)
+# Lower values reduce CPU load and eye jitter
+rate = 10.0
+
+# Thermal sensitivity multiplier (0.1-20.0)
+# Higher values make eyes more responsive to temperature differences
+sensitivity = 5.0
+
+# Minimum position change to trigger update (0.01-0.2)
+# Higher values reduce micro-jitters but may feel less responsive
+position_threshold = 0.05
+
+# Exponential smoothing factor (0.0-0.9)
+# Higher values create smoother motion but slower response
+# 0.0 = no smoothing (jittery), 0.9 = very smooth (sluggish)
+smoothing = 0.7
+
+# Magnitude threshold for person detection (1.0-30.0)
+# Increase (8.0-12.0) if tracker doesn't release control when no one is present
+# Decrease (3.0-4.0) if tracker fails to detect people
+# Person's face: 28-35°C = magnitude 8-15
+# Room temp objects: 22-25°C = magnitude 2-5
+detection_threshold = 3.0
+
+[features]
+# Enable sound trigger when detection starts
+# Plays random sound from sound_player service
+enable_detection_sound = true
+
+# Enable debug output and simulation mode
+debug = false

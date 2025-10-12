@@ -5,14 +5,7 @@ Wants=network-online.target systemd-resolved.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /boot/Pi_Eyes/thermal_tracker.py \
-    --eye-host 127.0.0.1 \
-    --eye-port 5005 \
-    --thermal-port 5007 \
-    --rate 5.0 \
-    --sensitivity 5.0 \
-    --position-threshold 0.05 \
-    --smoothing 0.7
+ExecStart=/usr/bin/python3 /boot/Pi_Eyes/thermal_tracker.py --config /boot/Pi_Eyes/thermal_tracker_config.ini
 Restart=on-failure
 User=sshpi
 Group=sshpi

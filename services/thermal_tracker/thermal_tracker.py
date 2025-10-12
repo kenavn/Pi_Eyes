@@ -20,6 +20,8 @@ import signal
 import sys
 import json
 from datetime import datetime
+from configparser import ConfigParser
+from pathlib import Path
 
 try:
     from amg8833_simple import AMG8833Simple
@@ -32,7 +34,8 @@ except ImportError:
 class ThermalTracker:
     def __init__(self, eye_host='127.0.0.1', eye_port=5005, thermal_port=5007,
                  update_rate=5.0, sensitivity=5.0, debug=False, position_threshold=0.05,
-                 smoothing=0.7):
+                 smoothing=0.7, sound_host='127.0.0.1', sound_port=5008,
+                 enable_detection_sound=False, detection_threshold=5.0):
         """
         Initialize the thermal tracker.
 
@@ -45,6 +48,10 @@ class ThermalTracker:
             debug: Enable debug output
             position_threshold: Minimum position change to trigger update (default 0.05)
             smoothing: Smoothing factor for position (0.0=no smoothing, 0.9=heavy smoothing, default 0.7)
+            sound_host: IP address of the sound player service (default 127.0.0.1)
+            sound_port: UDP port of the sound player service (default 5008)
+            enable_detection_sound: Enable sound trigger on detection start (default False)
+            detection_threshold: Magnitude threshold for person detection (default 5.0)
         """
         self.eye_host = eye_host
         self.eye_port = eye_port
@@ -54,6 +61,10 @@ class ThermalTracker:
         self.debug = debug
         self.position_threshold = position_threshold
         self.smoothing = smoothing
+        self.sound_host = sound_host
+        self.sound_port = sound_port
+        self.enable_detection_sound = enable_detection_sound
+        self.detection_threshold = detection_threshold
 
         # Thermal sensor
         self.sensor = None
@@ -63,6 +74,7 @@ class ThermalTracker:
         self.eye_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.status_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.status_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sound_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         # Tracking state
         self.current_x = 0.0
@@ -196,7 +208,21 @@ class ThermalTracker:
                 print("Sent controller disconnected - enabling auto movement")
         except Exception as e:
             print(f"Error sending controller disconnected: {e}")
-    
+
+    def trigger_detection_sound(self):
+        """Send command to sound player to play a random sound."""
+        if not self.enable_detection_sound:
+            return
+
+        try:
+            # Send 0x61 command to play random sound
+            message = b'\x61'
+            self.sound_sock.sendto(message, (self.sound_host, self.sound_port))
+            if self.debug:
+                print("Triggered detection sound (random)")
+        except Exception as e:
+            print(f"Error triggering detection sound: {e}")
+
     def get_thermal_pixels(self):
         """
         Read thermal pixel data from sensor or simulate data.
@@ -252,7 +278,7 @@ class ThermalTracker:
                     x, y, magnitude = self.calculate_gaze_direction(pixels)
                     
                     # Use thermal tracking if significant heat detected
-                    if magnitude > 2.0:  # Threshold for person detection
+                    if magnitude > self.detection_threshold:  # Threshold for person detection
                         # Apply exponential smoothing to reduce jitter
                         # smoothed = old * smoothing + new * (1 - smoothing)
                         if not hasattr(self, 'tracking_active') or not self.tracking_active:
@@ -261,6 +287,8 @@ class ThermalTracker:
                             self.smoothed_y = y
                             self.connect_controller()
                             self.tracking_active = True
+                            # Trigger detection sound when starting to track someone
+                            self.trigger_detection_sound()
                             # Force initial position update
                             self.last_sent_x = x
                             self.last_sent_y = y
@@ -295,9 +323,11 @@ class ThermalTracker:
                         if hasattr(self, 'tracking_active') and self.tracking_active:
                             self.disconnect_controller()
                             self.tracking_active = False
-                        
+                            if self.debug:
+                                print(f"Released control - magnitude {magnitude:.1f} below threshold {self.detection_threshold}")
+
                         if self.debug and int(start_time) != int(self.last_update - 1):
-                            print(f"No heat detected (magnitude={magnitude:.1f}), using auto movement")
+                            print(f"No heat detected (magnitude={magnitude:.1f}, threshold={self.detection_threshold}), using auto movement")
                 else:
                     # Sensor failed, disconnect controller to enable auto movement
                     if hasattr(self, 'tracking_active') and self.tracking_active:
@@ -390,20 +420,21 @@ class ThermalTracker:
         """Stop the thermal tracking service."""
         print("Stopping thermal tracking service...")
         self.running = False
-        
+
         # Ensure auto movement is restored
         if self.tracking_active:
             self.disconnect_controller()
             self.tracking_active = False
-        
+
         if self.sensor_thread:
             self.sensor_thread.join(timeout=2.0)
         if self.status_thread:
             self.status_thread.join(timeout=2.0)
-            
+
         self.eye_sock.close()
         self.status_sock.close()
-        
+        self.sound_sock.close()
+
         print("Thermal tracking service stopped")
 
 
@@ -415,26 +446,135 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
+def load_config(config_path=None):
+    """
+    Load configuration from INI file.
+
+    Args:
+        config_path: Path to config file. If None, tries default locations.
+
+    Returns:
+        dict: Configuration values with defaults
+    """
+    config = ConfigParser()
+
+    # Default config values
+    defaults = {
+        'eye_host': '127.0.0.1',
+        'eye_port': 5005,
+        'thermal_port': 5007,
+        'sound_host': '127.0.0.1',
+        'sound_port': 5008,
+        'rate': 10.0,
+        'sensitivity': 5.0,
+        'position_threshold': 0.05,
+        'smoothing': 0.7,
+        'detection_threshold': 3.0,
+        'enable_detection_sound': False,
+        'debug': False
+    }
+
+    # Try to find and load config file
+    config_file = None
+
+    if config_path:
+        # Use specified path
+        config_file = Path(config_path)
+    else:
+        # Try default locations
+        possible_paths = [
+            Path('/boot/Pi_Eyes/thermal_tracker_config.ini'),  # Pi location
+            Path.cwd() / 'config.ini',  # Current directory
+            Path(__file__).parent / 'config.ini',  # Script directory
+        ]
+
+        for path in possible_paths:
+            if path.exists():
+                config_file = path
+                break
+
+    # Load config file if found
+    if config_file and config_file.exists():
+        print(f"Loading config from: {config_file}")
+        config.read(config_file)
+
+        # Parse config sections
+        if config.has_section('network'):
+            defaults['eye_host'] = config.get('network', 'eye_host', fallback=defaults['eye_host'])
+            defaults['eye_port'] = config.getint('network', 'eye_port', fallback=defaults['eye_port'])
+            defaults['thermal_port'] = config.getint('network', 'thermal_port', fallback=defaults['thermal_port'])
+            defaults['sound_host'] = config.get('network', 'sound_host', fallback=defaults['sound_host'])
+            defaults['sound_port'] = config.getint('network', 'sound_port', fallback=defaults['sound_port'])
+
+        if config.has_section('tracking'):
+            defaults['rate'] = config.getfloat('tracking', 'rate', fallback=defaults['rate'])
+            defaults['sensitivity'] = config.getfloat('tracking', 'sensitivity', fallback=defaults['sensitivity'])
+            defaults['position_threshold'] = config.getfloat('tracking', 'position_threshold', fallback=defaults['position_threshold'])
+            defaults['smoothing'] = config.getfloat('tracking', 'smoothing', fallback=defaults['smoothing'])
+            defaults['detection_threshold'] = config.getfloat('tracking', 'detection_threshold', fallback=defaults['detection_threshold'])
+
+        if config.has_section('features'):
+            defaults['enable_detection_sound'] = config.getboolean('features', 'enable_detection_sound', fallback=defaults['enable_detection_sound'])
+            defaults['debug'] = config.getboolean('features', 'debug', fallback=defaults['debug'])
+    else:
+        print("No config file found, using defaults")
+
+    return defaults
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Thermal Eye Tracker for Pi_Eyes')
-    parser.add_argument('--eye-host', default='127.0.0.1',
-                        help='IP address of eye controller (default: 127.0.0.1)')
-    parser.add_argument('--eye-port', type=int, default=5005,
-                        help='UDP port of eye controller (default: 5005)')
-    parser.add_argument('--thermal-port', type=int, default=5007,
-                        help='UDP port for thermal tracker status (default: 5007)')
-    parser.add_argument('--rate', type=float, default=5.0,
-                        help='Update rate in Hz (default: 5.0)')
-    parser.add_argument('--sensitivity', type=float, default=5.0,
-                        help='Thermal sensitivity multiplier (default: 5.0)')
-    parser.add_argument('--position-threshold', type=float, default=0.05,
-                        help='Minimum position change to trigger update (default: 0.05)')
-    parser.add_argument('--smoothing', type=float, default=0.7,
-                        help='Smoothing factor 0.0-0.9, higher=smoother but slower (default: 0.7)')
+    parser = argparse.ArgumentParser(
+        description='Thermal Eye Tracker for Pi_Eyes',
+        epilog='Config file values override defaults. CLI arguments override config file.')
+
+    parser.add_argument('--config',
+                        help='Path to config file (default: searches common locations)')
+    parser.add_argument('--eye-host',
+                        help='IP address of eye controller (overrides config)')
+    parser.add_argument('--eye-port', type=int,
+                        help='UDP port of eye controller (overrides config)')
+    parser.add_argument('--thermal-port', type=int,
+                        help='UDP port for thermal tracker status (overrides config)')
+    parser.add_argument('--rate', type=float,
+                        help='Update rate in Hz (overrides config)')
+    parser.add_argument('--sensitivity', type=float,
+                        help='Thermal sensitivity multiplier (overrides config)')
+    parser.add_argument('--position-threshold', type=float,
+                        help='Minimum position change to trigger update (overrides config)')
+    parser.add_argument('--smoothing', type=float,
+                        help='Smoothing factor 0.0-0.9 (overrides config)')
+    parser.add_argument('--sound-host',
+                        help='IP address of sound player service (overrides config)')
+    parser.add_argument('--sound-port', type=int,
+                        help='UDP port of sound player service (overrides config)')
+    parser.add_argument('--enable-detection-sound', action='store_true',
+                        help='Enable sound trigger when detection starts (overrides config)')
+    parser.add_argument('--detection-threshold', type=float,
+                        help='Magnitude threshold for person detection (overrides config)')
     parser.add_argument('--debug', action='store_true',
-                        help='Enable debug output and simulation mode')
+                        help='Enable debug output and simulation mode (overrides config)')
 
     args = parser.parse_args()
+
+    # Load configuration from file
+    config = load_config(args.config)
+
+    # CLI arguments override config file values
+    # Use getattr to check if CLI arg was actually provided
+    eye_host = args.eye_host if args.eye_host else config['eye_host']
+    eye_port = args.eye_port if args.eye_port else config['eye_port']
+    thermal_port = args.thermal_port if args.thermal_port else config['thermal_port']
+    rate = args.rate if args.rate else config['rate']
+    sensitivity = args.sensitivity if args.sensitivity else config['sensitivity']
+    position_threshold = args.position_threshold if args.position_threshold else config['position_threshold']
+    smoothing = args.smoothing if args.smoothing else config['smoothing']
+    sound_host = args.sound_host if args.sound_host else config['sound_host']
+    sound_port = args.sound_port if args.sound_port else config['sound_port']
+    detection_threshold = args.detection_threshold if args.detection_threshold else config['detection_threshold']
+
+    # Boolean flags need special handling - args override config
+    enable_detection_sound = args.enable_detection_sound or config['enable_detection_sound']
+    debug = args.debug or config['debug']
 
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
@@ -443,14 +583,18 @@ def main():
     # Create and start tracker
     global tracker
     tracker = ThermalTracker(
-        eye_host=args.eye_host,
-        eye_port=args.eye_port,
-        thermal_port=args.thermal_port,
-        update_rate=args.rate,
-        sensitivity=args.sensitivity,
-        debug=args.debug,
-        position_threshold=args.position_threshold,
-        smoothing=args.smoothing
+        eye_host=eye_host,
+        eye_port=eye_port,
+        thermal_port=thermal_port,
+        update_rate=rate,
+        sensitivity=sensitivity,
+        debug=debug,
+        position_threshold=position_threshold,
+        smoothing=smoothing,
+        sound_host=sound_host,
+        sound_port=sound_port,
+        enable_detection_sound=enable_detection_sound,
+        detection_threshold=detection_threshold
     )
     
     if tracker.start():

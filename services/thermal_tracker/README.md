@@ -9,6 +9,7 @@ Automatic eye tracking service for Pi_Eyes using the Adafruit AMG8833 IR thermal
 - **Status Interface**: UDP port 5007 for configuration and monitoring
 - **Smooth Motion**: Configurable smoothing and position thresholds
 - **Auto-Fallback**: Seamlessly hands control back to autonomous eye movement
+- **Sound Integration**: Optional sound trigger when detection starts (plays random sound via sound_player service)
 - **Systemd Service**: Auto-start on boot with automatic restart
 - **Debug Tools**: Testing and calibration utilities included
 
@@ -142,6 +143,9 @@ ssh <pi_ip> 'sudo systemctl disable thermal_tracker.service'
 # Run on Pi with debug output
 python3 thermal_tracker.py --debug --sensitivity 7.5
 
+# Enable detection sound (requires sound_player service running)
+python3 thermal_tracker.py --enable-detection-sound
+
 # Custom parameters
 python3 thermal_tracker.py \
     --eye-host 127.0.0.1 \
@@ -150,25 +154,82 @@ python3 thermal_tracker.py \
     --rate 5.0 \
     --sensitivity 5.0 \
     --position-threshold 0.05 \
-    --smoothing 0.7
+    --smoothing 0.7 \
+    --sound-host 127.0.0.1 \
+    --sound-port 5008 \
+    --enable-detection-sound
 ```
 
 ## Configuration
 
-### Command-Line Parameters
+The thermal tracker can be configured using either a configuration file (recommended) or command-line parameters. Configuration file values override defaults, and command-line arguments override both.
 
-The thermal tracker supports several parameters to tune performance and smoothness:
+### Configuration File (Recommended)
+
+Create a `config.ini` file with your settings. The service looks for config files in these locations (in order):
+
+1. `/boot/Pi_Eyes/thermal_tracker_config.ini` (Pi production location)
+2. `./config.ini` (current directory)
+3. `config.ini` (in script directory)
+
+Or specify a custom path: `--config /path/to/config.ini`
+
+**Create your config:**
 
 ```bash
-# Basic usage with all parameters
+# Copy the example config
+cp config.ini.example config.ini
+
+# Edit with your settings
+nano config.ini
+```
+
+**Example config.ini:**
+
+```ini
+[network]
+eye_host = 127.0.0.1
+eye_port = 5005
+thermal_port = 5007
+sound_host = 127.0.0.1
+sound_port = 5008
+
+[tracking]
+rate = 10.0
+sensitivity = 5.0
+position_threshold = 0.05
+smoothing = 0.7
+detection_threshold = 3.0
+
+[features]
+enable_detection_sound = true
+debug = false
+```
+
+See `config.ini.example` for full documentation of all settings.
+
+### Command-Line Parameters (Optional Overrides)
+
+Command-line arguments override config file values. Useful for testing or temporary changes:
+
+```bash
+# Use config file
+python3 thermal_tracker.py --config /path/to/config.ini
+
+# Use config file but override detection threshold
+python3 thermal_tracker.py --config config.ini --detection-threshold 8.0
+
+# Use config file but enable debug
+python3 thermal_tracker.py --debug
+
+# All CLI parameters (no config file)
 python3 thermal_tracker.py \
     --eye-host 127.0.0.1 \
     --eye-port 5005 \
-    --thermal-port 5007 \
-    --rate 5.0 \
+    --rate 10.0 \
     --sensitivity 5.0 \
-    --position-threshold 0.05 \
-    --smoothing 0.7 \
+    --detection-threshold 3.0 \
+    --enable-detection-sound \
     --debug
 ```
 
@@ -180,6 +241,15 @@ python3 thermal_tracker.py \
 | `--position-threshold` | 0.05 | 0.01-0.2 | Minimum position change (0-1 scale) to trigger an eye update. Higher values reduce micro-jitters but may feel less responsive. |
 | `--smoothing` | 0.7 | 0.0-0.9 | Exponential smoothing factor. Higher values create smoother motion but slower response. 0.0=no smoothing (jittery), 0.9=very smooth (sluggish). |
 | `--sensitivity` | 5.0 | 0.1-20.0 | Thermal sensitivity multiplier. Higher values make eyes more responsive to temperature differences. |
+| `--detection-threshold` | 5.0 | 1.0-30.0 | Magnitude threshold for person detection. Increase (8.0-12.0) if tracker doesn't release control when no one is present. Decrease (3.0-4.0) if tracker fails to detect people. |
+
+#### Sound Integration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--sound-host` | 127.0.0.1 | IP address of the sound player service |
+| `--sound-port` | 5008 | UDP port of the sound player service |
+| `--enable-detection-sound` | disabled | Enable sound trigger when detection starts (plays random sound) |
 
 #### Common Tuning Scenarios
 
@@ -207,6 +277,18 @@ python3 thermal_tracker.py \
 --sensitivity 8.0
 ```
 
+**Tracker not releasing control (eyes stay locked even when no one is present):**
+```bash
+# Increase detection threshold
+--detection-threshold 10.0
+```
+
+**Tracker not detecting people:**
+```bash
+# Decrease detection threshold
+--detection-threshold 3.0
+```
+
 ### Runtime Configuration
 
 The thermal tracker can also be configured via UDP commands on port 5007:
@@ -221,31 +303,55 @@ echo "sensitivity=8.0" | nc -u 127.0.0.1 5007
 
 ### Systemd Service Configuration
 
-To permanently change settings, edit the service file at `/etc/systemd/system/thermal_tracker.service`:
+The service uses the config file at `/boot/Pi_Eyes/thermal_tracker_config.ini`. To change settings:
 
 ```bash
-sudo nano /etc/systemd/system/thermal_tracker.service
+# Edit the config file on the Pi
+ssh <pi_ip> 'sudo nano /boot/Pi_Eyes/thermal_tracker_config.ini'
+
+# Restart the service to apply changes
+ssh <pi_ip> 'sudo systemctl restart thermal_tracker.service'
 ```
 
-Modify the `ExecStart` line with your desired parameters:
+The service file is simple and doesn't need modification:
 
 ```ini
-ExecStart=/usr/bin/python3 /boot/Pi_Eyes/thermal_tracker.py \
-    --eye-host 127.0.0.1 \
-    --eye-port 5005 \
-    --thermal-port 5007 \
-    --rate 5.0 \
-    --sensitivity 5.0 \
-    --position-threshold 0.05 \
-    --smoothing 0.7
+[Service]
+ExecStart=/usr/bin/python3 /boot/Pi_Eyes/thermal_tracker.py --config /boot/Pi_Eyes/thermal_tracker_config.ini
 ```
 
-Then reload and restart:
+**To temporarily override settings without editing the config:**
 
 ```bash
+# Edit service file to add CLI overrides
+sudo nano /etc/systemd/system/thermal_tracker.service
+
+# Example: override detection threshold
+ExecStart=/usr/bin/python3 /boot/Pi_Eyes/thermal_tracker.py \
+    --config /boot/Pi_Eyes/thermal_tracker_config.ini \
+    --detection-threshold 10.0
+
+# Reload and restart
 sudo systemctl daemon-reload
 sudo systemctl restart thermal_tracker.service
 ```
+
+### Sound Integration
+
+The thermal tracker can optionally trigger a random sound when it starts detecting someone. This requires the `sound_player` service to be running.
+
+**Setup:**
+
+1. Ensure the sound_player service is installed and running (see [services/sound_player/README.md](../sound_player/README.md))
+2. Add sound files to `/boot/Pi_Eyes/sounds/random/` on the Pi
+3. Enable detection sound with `--enable-detection-sound` flag
+
+**Behavior:**
+
+- When thermal tracker first detects a person (magnitude > detection_threshold), it sends a single UDP command to the sound player
+- The sound player plays a random sound from the `sounds/random/` directory
+- Sound is only triggered once when detection starts, not continuously during tracking
+- If sound_player service is not running, the thermal tracker continues to work normally (sound trigger is non-blocking)
 
 ## Wiring AMG8833 to Raspberry Pi
 
@@ -270,6 +376,10 @@ sudo systemctl restart thermal_tracker.service
 The tracking uses a temperature-weighted centroid calculation:
 - Each thermal pixel's position is weighted by its temperature
 - The centroid is calculated and scaled to eye movement range (-1.0 to 1.0)
+- Magnitude is calculated as `max(0, min(50, max_temp - 20))` where max_temp is the hottest pixel in °C
+- A person's face typically reads 28-35°C, giving magnitude of 8-15
+- Room temperature objects (22-25°C) give magnitude of 2-5
+- Detection threshold (default 5.0) determines when to start tracking vs. release control
 - Higher sensitivity values make the eyes more responsive to smaller temperature differences
 - The system sends standard eye position commands (0x20 + x_byte + y_byte) to port 5005
 
@@ -279,17 +389,18 @@ The tracking uses a temperature-weighted centroid calculation:
 
 The thermal tracking system integrates with Pi_Eyes' built-in autonomous movement:
 
-1. **Heat Source Detected** (magnitude > 2.0): 
+1. **Heat Source Detected** (magnitude > detection_threshold):
    - Thermal tracker takes control (`joystick_connected` command)
    - Eyes track the heat source (person's face, hand, etc.) smoothly
    - Pi_Eyes autonomous movement is disabled during tracking
    - Debug output: `Tracking: x=0.123, y=0.456, heat=7.8`
 
-2. **No Heat Source** (magnitude ≤ 2.0):
+2. **No Heat Source** (magnitude ≤ detection_threshold):
    - Thermal tracker releases control (`joystick_disconnected` command)
    - **Pi_Eyes resumes its built-in autonomous movement** (random, natural patterns)
    - This maintains the robot's lifelike behavior when no one is present
-   - Debug output: `No heat detected (magnitude=1.2), using auto movement`
+   - Debug output: `No heat detected (magnitude=1.2, threshold=5.0), using auto movement`
+   - Debug output on release: `Released control - magnitude 4.2 below threshold 5.0`
 
 3. **Sensor Error**:
    - Thermal tracker releases control to Pi_Eyes autonomous movement
@@ -338,7 +449,7 @@ The thermal tracker runs independently and integrates with:
 
 - **Eye Controller** (`eyes.py`): Sends position commands and controller status
 - **MQTT Animation Daemon**: Can be disabled during thermal tracking
-- **Sound Player**: Can trigger sounds based on tracking events (future enhancement)
+- **Sound Player** (`sound_player.py`): Triggers random sound when detection starts (optional, see Sound Integration section)
 - **Custom Scripts**: Any service that can send UDP packets to port 5007
 
 ## Development

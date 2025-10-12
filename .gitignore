@@ -132,6 +132,10 @@ dmypy.json
 deploy.sh
 services/*/deploy.sh
 
+# Configuration files (use .example templates instead)
+config.ini
+services/*/config.ini
+
 # Sound files
 services/sound_player/sounds/*.mp3
 services/sound_player/sounds/*.wav
