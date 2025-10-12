@@ -349,9 +349,24 @@ The thermal tracker can optionally trigger a random sound when it starts detecti
 **Behavior:**
 
 - When thermal tracker first detects a person (magnitude > detection_threshold), it sends a single UDP command to the sound player
-- The sound player plays a random sound from the `sounds/random/` directory
+- If `detection_sound_file` is specified in config, plays that specific file from `/boot/Pi_Eyes/sounds/`
+- If `detection_sound_file` is empty, plays a random sound from `/boot/Pi_Eyes/sounds/random/`
 - Sound is only triggered once when detection starts, not continuously during tracking
 - If sound_player service is not running, the thermal tracker continues to work normally (sound trigger is non-blocking)
+
+**Example configurations:**
+
+```ini
+# Play specific sound file
+[features]
+enable_detection_sound = true
+detection_sound_file = hello.mp3
+
+# Play random sound
+[features]
+enable_detection_sound = true
+detection_sound_file =
+```
 
 ## Wiring AMG8833 to Raspberry Pi
 

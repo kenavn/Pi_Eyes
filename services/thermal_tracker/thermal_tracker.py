@@ -35,7 +35,7 @@ class ThermalTracker:
     def __init__(self, eye_host='127.0.0.1', eye_port=5005, thermal_port=5007,
                  update_rate=5.0, sensitivity=5.0, debug=False, position_threshold=0.05,
                  smoothing=0.7, sound_host='127.0.0.1', sound_port=5008,
-                 enable_detection_sound=False, detection_threshold=5.0):
+                 enable_detection_sound=False, detection_threshold=5.0, detection_sound_file=''):
         """
         Initialize the thermal tracker.
 
@@ -52,6 +52,7 @@ class ThermalTracker:
             sound_port: UDP port of the sound player service (default 5008)
             enable_detection_sound: Enable sound trigger on detection start (default False)
             detection_threshold: Magnitude threshold for person detection (default 5.0)
+            detection_sound_file: Specific sound file to play on detection (empty string = random)
         """
         self.eye_host = eye_host
         self.eye_port = eye_port
@@ -65,6 +66,7 @@ class ThermalTracker:
         self.sound_port = sound_port
         self.enable_detection_sound = enable_detection_sound
         self.detection_threshold = detection_threshold
+        self.detection_sound_file = detection_sound_file
 
         # Thermal sensor
         self.sensor = None
@@ -210,16 +212,24 @@ class ThermalTracker:
             print(f"Error sending controller disconnected: {e}")
 
     def trigger_detection_sound(self):
-        """Send command to sound player to play a random sound."""
+        """Send command to sound player to play detection sound."""
         if not self.enable_detection_sound:
             return
 
         try:
-            # Send 0x61 command to play random sound
-            message = b'\x61'
-            self.sound_sock.sendto(message, (self.sound_host, self.sound_port))
-            if self.debug:
-                print("Triggered detection sound (random)")
+            if self.detection_sound_file:
+                # Play specific sound file (0x60 + filename)
+                filename_bytes = self.detection_sound_file.encode('utf-8')
+                message = b'\x60' + filename_bytes + b'\x00'  # null-terminated
+                self.sound_sock.sendto(message, (self.sound_host, self.sound_port))
+                if self.debug:
+                    print(f"Triggered detection sound: {self.detection_sound_file}")
+            else:
+                # Play random sound (0x61)
+                message = b'\x61'
+                self.sound_sock.sendto(message, (self.sound_host, self.sound_port))
+                if self.debug:
+                    print("Triggered detection sound (random)")
         except Exception as e:
             print(f"Error triggering detection sound: {e}")
 
@@ -471,6 +481,7 @@ def load_config(config_path=None):
         'smoothing': 0.7,
         'detection_threshold': 3.0,
         'enable_detection_sound': False,
+        'detection_sound_file': '',
         'debug': False
     }
 
@@ -515,6 +526,7 @@ def load_config(config_path=None):
 
         if config.has_section('features'):
             defaults['enable_detection_sound'] = config.getboolean('features', 'enable_detection_sound', fallback=defaults['enable_detection_sound'])
+            defaults['detection_sound_file'] = config.get('features', 'detection_sound_file', fallback=defaults['detection_sound_file'])
             defaults['debug'] = config.getboolean('features', 'debug', fallback=defaults['debug'])
     else:
         print("No config file found, using defaults")
@@ -549,6 +561,8 @@ def main():
                         help='UDP port of sound player service (overrides config)')
     parser.add_argument('--enable-detection-sound', action='store_true',
                         help='Enable sound trigger when detection starts (overrides config)')
+    parser.add_argument('--detection-sound-file',
+                        help='Specific sound file to play on detection, empty=random (overrides config)')
     parser.add_argument('--detection-threshold', type=float,
                         help='Magnitude threshold for person detection (overrides config)')
     parser.add_argument('--debug', action='store_true',
@@ -571,6 +585,7 @@ def main():
     sound_host = args.sound_host if args.sound_host else config['sound_host']
     sound_port = args.sound_port if args.sound_port else config['sound_port']
     detection_threshold = args.detection_threshold if args.detection_threshold else config['detection_threshold']
+    detection_sound_file = args.detection_sound_file if args.detection_sound_file is not None else config['detection_sound_file']
 
     # Boolean flags need special handling - args override config
     enable_detection_sound = args.enable_detection_sound or config['enable_detection_sound']
@@ -594,7 +609,8 @@ def main():
         sound_host=sound_host,
         sound_port=sound_port,
         enable_detection_sound=enable_detection_sound,
-        detection_threshold=detection_threshold
+        detection_threshold=detection_threshold,
+        detection_sound_file=detection_sound_file
     )
     
     if tracker.start():

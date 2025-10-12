@@ -41,8 +41,13 @@ detection_threshold = 3.0
 
 [features]
 # Enable sound trigger when detection starts
-# Plays random sound from sound_player service
 enable_detection_sound = true
+
+# Specific sound file to play on detection
+# Leave empty to play random sound from sound_player's random directory
+# Examples: detection.mp3, hello.wav, greeting.ogg
+# The file should exist in /boot/Pi_Eyes/sounds/ on the Pi
+detection_sound_file = detection.mp3
 
 # Enable debug output and simulation mode
 debug = false
