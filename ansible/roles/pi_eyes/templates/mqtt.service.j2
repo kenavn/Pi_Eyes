@@ -1,0 +1,47 @@
+[Unit]
+Description=Skeleton MQTT Service
+After=network-online.target systemd-resolved.service
+Wants=network-online.target systemd-resolved.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 {{ pi_eyes_install_path }}/editor/animationDaemon.py \
+  --mqtt-host {{ pi_eyes_mqtt_host }} \
+  --mqtt-port {{ pi_eyes_mqtt_port }} \
+  --robot-name {{ pi_eyes_robot_name }} \
+{% if pi_eyes_mqtt_user %}
+  --mqtt-user {{ pi_eyes_mqtt_user }} \
+{% endif %}
+{% if pi_eyes_mqtt_pass %}
+  --mqtt-pass {{ pi_eyes_mqtt_pass }} \
+{% endif %}
+  --animations-dir {{ pi_eyes_animations_dir }} \
+  --eye-port {{ pi_eyes_eye_port }} \
+  --mouth-port {{ pi_eyes_mouth_udp_port }}
+Restart=on-failure
+User={{ pi_eyes_user }}
+Group={{ pi_eyes_group }}
+
+# Network retry logic
+ExecStartPre=/bin/sh -c 'until host {{ pi_eyes_mqtt_host }}; do sleep 2; done'
+
+# Runtime directory setup
+RuntimeDirectory=user/1000/pulse
+RuntimeDirectoryMode=0700
+
+# Environment setup
+Environment=PYTHONUNBUFFERED=1
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=HOME=/home/{{ pi_eyes_user }}
+Environment=DISPLAY=:0
+Environment=PULSE_RUNTIME_PATH=/run/user/1000/pulse
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+
+SupplementaryGroups=audio pulse-access
+
+StartLimitBurst=5
+StartLimitIntervalSec=60
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

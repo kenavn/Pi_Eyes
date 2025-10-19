@@ -1,0 +1,130 @@
+---
+# Pi_Eyes Ansible Role - Main Tasks
+
+- name: Install system packages
+  ansible.builtin.apt:
+    name: "{{ pi_eyes_system_packages }}"
+    state: present
+    update_cache: true
+  become: true
+
+- name: Ensure pigpiod service is enabled and started
+  ansible.builtin.systemd:
+    name: pigpiod
+    enabled: true
+    state: started
+  become: true
+
+- name: Install Python packages
+  ansible.builtin.pip:
+    name: "{{ pi_eyes_python_packages }}"
+    state: present
+    executable: pip3
+  become: true
+
+- name: Create Pi_Eyes installation directory
+  ansible.builtin.file:
+    path: "{{ pi_eyes_install_path }}"
+    state: directory
+    mode: '0755'
+  become: true
+
+- name: Synchronize Pi_Eyes code to target
+  ansible.posix.synchronize:
+    src: "{{ role_path }}/../../"
+    dest: "{{ pi_eyes_install_path }}"
+    delete: false
+    recursive: true
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=.gitignore"
+      - "--exclude=ansible"
+      - "--exclude=editor/venv"
+      - "--exclude=__pycache__"
+      - "--exclude=*.pyc"
+  become: true
+  notify:
+    - Restart mouth service
+    - Restart backlight service
+    - Restart mqtt service
+
+- name: Make Python scripts executable
+  ansible.builtin.file:
+    path: "{{ pi_eyes_install_path }}/{{ item }}"
+    mode: '0755'
+  become: true
+  loop:
+    - eyes.py
+    - mouth.py
+    - backlight.py
+    - editor/animationDaemon.py
+
+- name: Create animations directory for MQTT service
+  ansible.builtin.file:
+    path: "{{ pi_eyes_animations_dir }}"
+    state: directory
+    owner: "{{ pi_eyes_user }}"
+    group: "{{ pi_eyes_group }}"
+    mode: '0755'
+  become: true
+  when: pi_eyes_install_mqtt
+
+- name: Deploy mouth service
+  ansible.builtin.template:
+    src: mouth.service.j2
+    dest: /etc/systemd/system/mouth.service
+    mode: '0644'
+  become: true
+  when: pi_eyes_install_mouth
+  notify:
+    - Reload systemd
+    - Restart mouth service
+
+- name: Deploy backlight service
+  ansible.builtin.template:
+    src: backlight.service.j2
+    dest: /etc/systemd/system/backlight.service
+    mode: '0644'
+  become: true
+  when: pi_eyes_install_backlight
+  notify:
+    - Reload systemd
+    - Restart backlight service
+
+- name: Deploy MQTT service
+  ansible.builtin.template:
+    src: mqtt.service.j2
+    dest: /etc/systemd/system/mqtt.service
+    mode: '0644'
+  become: true
+  when: pi_eyes_install_mqtt
+  notify:
+    - Reload systemd
+    - Restart mqtt service
+
+- name: Enable and start mouth service
+  ansible.builtin.systemd:
+    name: mouth.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: pi_eyes_install_mouth
+
+- name: Enable and start backlight service
+  ansible.builtin.systemd:
+    name: backlight.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: pi_eyes_install_backlight
+
+- name: Enable and start MQTT service
+  ansible.builtin.systemd:
+    name: mqtt.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: pi_eyes_install_mqtt

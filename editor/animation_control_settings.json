@@ -1,5 +1,5 @@
 {
-    "host": "raspieyes",
+    "host": "raspieyes.regins.no",
     "eye_port": 5005,
     "mouth_port": 5006
 }

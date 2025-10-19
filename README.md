@@ -46,6 +46,25 @@ After enabling this service, we also need to add the mouth.py program to the sys
 You can check the status of the new service by running:
 `sudo systemctl status mouth.service`
 
+### Install the backlight controller (optional)
+
+The backlight controller provides PWM-based brightness control for LED panels in the Snake Eyes Bonnet (backlight.py).
+
+**Note:** This is optional and requires additional hardware setup. If you don't have backlight hardware installed, you can skip this section.
+
+To install the backlight service:
+
+1. Copy the `backlight.py` file into `/boot/Pi_Eyes/` folder on the Raspberry Pi
+2. Copy the `backlight.service` file into `/etc/systemd/system/` folder (you will need sudo)
+3. `sudo chmod +x /boot/Pi_Eyes/backlight.py`
+4. Edit the service file if needed to adjust GPIO pin, brightness, or port settings
+5. `sudo systemctl daemon-reload`
+6. `sudo systemctl enable backlight.service`
+7. `sudo systemctl start backlight.service`
+
+You can check the status:
+`sudo systemctl status backlight.service`
+
 ### Install the MQTT controller (optional)
 
 The head can have a MQTT client that connects to a MQTT server. It provides an interface
@@ -76,12 +95,40 @@ Press the SHARE button on controller to start/stop recording.
 
 A simple GUI is created to be able to record eye and mouth movement in separate sessions, and to create package files containing both sound and animation instructions. These files are used by the MQTT service (see above).
 
-Installing and running it should be straight forward;
+#### Quick Start (Recommended)
+
+The easiest way to run the editor is using the provided launcher scripts that automatically handle virtual environment setup and dependencies:
+
+**Linux/Mac:**
+```bash
+cd editor
+./run_editor.sh
+```
+
+**Windows:**
+```cmd
+cd editor
+run_editor.bat
+```
+
+The launcher scripts will:
+- Create a Python virtual environment automatically
+- Install all required dependencies
+- Check for game controller presence
+- Launch the Animatronics Studio
+
+**Prerequisites:**
+- Python 3 installed on your system
+- PS4 controller or Xbox controller attached to your PC
+
+#### Manual Installation (Alternative)
+
+If you prefer to set up manually:
 
 1. Install the python scripts in the `editor` folder to somewhere in your PC
-2. Install the prerequisites in the `editor` folder; `pip install -r requirements.txt`
-3. Make sure you have a PS4 controller or a XBox controller attached to the PC
-4. Run main.py
+2. Install the prerequisites in the `editor` folder: `pip install -r requirements.txt`
+3. Make sure you have a PS4 controller or Xbox controller attached to the PC
+4. Run: `python main.py`
 
 #### How to use the package files
 

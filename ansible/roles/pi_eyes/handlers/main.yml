@@ -1,0 +1,28 @@
+---
+# Pi_Eyes Ansible Role - Handlers
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+
+- name: Restart mouth service
+  ansible.builtin.systemd:
+    name: mouth.service
+    state: restarted
+  become: true
+  when: pi_eyes_install_mouth
+
+- name: Restart backlight service
+  ansible.builtin.systemd:
+    name: backlight.service
+    state: restarted
+  become: true
+  when: pi_eyes_install_backlight
+
+- name: Restart mqtt service
+  ansible.builtin.systemd:
+    name: mqtt.service
+    state: restarted
+  become: true
+  when: pi_eyes_install_mqtt

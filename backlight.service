@@ -1,0 +1,11 @@
+[Unit]
+Description=Snake Eyes Backlight Control
+After=network.target pigpiod.service
+
+[Service]
+ExecStart=/usr/bin/python3 /boot/Pi_Eyes/backlight.py --brightness 255
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

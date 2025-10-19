@@ -1,0 +1,50 @@
+---
+# Example playbook for deploying Pi_Eyes
+#
+# PREREQUISITES:
+#   You must first install the base Snake Eyes Bonnet software by following:
+#   https://learn.adafruit.com/animated-snake-eyes-bonnet-for-raspberry-pi/software-installation
+#
+# Usage:
+#   ansible-playbook -i inventory example-playbook.yml
+
+- name: Deploy Pi_Eyes Animatronics System
+  hosts: animatronics
+  become: yes
+
+  vars:
+    # Enable/disable components
+    pi_eyes_install_eyes: true
+    pi_eyes_install_mouth: true
+    pi_eyes_install_backlight: false  # Set to true if backlight hardware is installed
+    pi_eyes_install_mqtt: true
+
+    # MQTT configuration
+    pi_eyes_mqtt_host: mqtt.example.com
+    pi_eyes_mqtt_port: 1883
+    pi_eyes_mqtt_user: robot
+    pi_eyes_mqtt_pass: secret
+    pi_eyes_robot_name: head1
+
+    # Mouth servo tuning
+    pi_eyes_mouth_idle_position: 128
+    pi_eyes_mouth_idle_timeout: 2.0
+    pi_eyes_mouth_idle_ease_duration: 0.5
+
+  roles:
+    - pi_eyes
+
+  post_tasks:
+    - name: Show service status
+      command: systemctl status {{ item }}
+      register: service_status
+      failed_when: false
+      changed_when: false
+      loop:
+        - mouth.service
+        - backlight.service
+        - mqtt.service
+
+    - name: Display service status
+      debug:
+        msg: "{{ service_status.results | map(attribute='stdout_lines') | list }}"

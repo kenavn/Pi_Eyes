@@ -1,0 +1,35 @@
+---
+galaxy_info:
+  role_name: pi_eyes
+  author: Kenneth Avner
+  description: Ansible role for deploying Pi_Eyes animatronics control system
+  company: ""
+
+  license: MIT
+
+  min_ansible_version: "2.9"
+
+  platforms:
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+    - name: Ubuntu
+      versions:
+        - focal
+        - jammy
+
+  galaxy_tags:
+    - raspberrypi
+    - animatronics
+    - iot
+    - robotics
+    - servo
+    - mqtt
+
+dependencies:
+  - role: ansible.posix
+    when: ansible_version.full is version('2.10', '>=')
+
+collections:
+  - ansible.posix

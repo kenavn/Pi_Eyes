@@ -1,0 +1,18 @@
+[Unit]
+Description=Snake Eyes Backlight Control
+After=network.target pigpiod.service
+Requires=pigpiod.service
+
+[Service]
+ExecStart=/usr/bin/python3 {{ pi_eyes_install_path }}/backlight.py \
+  --pin {{ pi_eyes_backlight_pin }} \
+  --brightness {{ pi_eyes_backlight_brightness }} \
+  --port {{ pi_eyes_backlight_port }} \
+  --freq {{ pi_eyes_backlight_freq }}
+Restart=always
+RestartSec=5
+User={{ pi_eyes_user }}
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

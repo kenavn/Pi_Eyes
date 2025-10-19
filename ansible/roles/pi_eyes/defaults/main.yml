@@ -1,0 +1,54 @@
+---
+# Pi_Eyes Ansible Role - Default Variables
+
+# Installation paths
+pi_eyes_install_path: /boot/Pi_Eyes
+pi_eyes_animations_dir: /etc/anim
+
+# Service configuration - what to install
+pi_eyes_install_eyes: true
+pi_eyes_install_mouth: true
+pi_eyes_install_backlight: false  # Set to true if backlight hardware is installed
+pi_eyes_install_mqtt: false
+
+# Eyes configuration
+pi_eyes_radius: 240
+
+# Mouth servo configuration
+pi_eyes_mouth_pin: 22
+pi_eyes_mouth_port: 5006
+pi_eyes_mouth_pwm_min: 102
+pi_eyes_mouth_pwm_max: 180
+pi_eyes_mouth_idle_position: 128
+pi_eyes_mouth_idle_timeout: 2.0
+pi_eyes_mouth_idle_ease_duration: 0.5
+
+# Backlight configuration
+pi_eyes_backlight_pin: 18
+pi_eyes_backlight_port: 5007
+pi_eyes_backlight_brightness: 255
+pi_eyes_backlight_freq: 1000
+
+# MQTT configuration (only used if pi_eyes_install_mqtt: true)
+pi_eyes_mqtt_host: localhost
+pi_eyes_mqtt_port: 1883
+pi_eyes_mqtt_user: ""
+pi_eyes_mqtt_pass: ""
+pi_eyes_robot_name: head1
+pi_eyes_eye_port: 5005
+pi_eyes_mouth_udp_port: 5006
+
+# System user for services
+pi_eyes_user: root
+pi_eyes_group: root
+
+# Python dependencies
+pi_eyes_python_packages:
+  - paho-mqtt
+  - bleak
+
+# System packages
+pi_eyes_system_packages:
+  - pigpio
+  - python3-pigpio
+  - python3-pip

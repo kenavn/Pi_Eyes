@@ -1,0 +1,16 @@
+---
+# Example requirements.yml for using this role in another Ansible project
+#
+# Copy this to your Ansible repository and modify as needed.
+# Install with:
+#   ansible-galaxy collection install -r requirements.yml
+#   ansible-galaxy install -r requirements.yml -p roles/
+
+collections:
+  - name: ansible.posix
+
+roles:
+  - name: pi_eyes
+    src: https://github.com/kenavn/Pi_Eyes.git
+    scm: git
+    version: master  # or use a specific tag like v1.0.0
