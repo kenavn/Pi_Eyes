@@ -56,7 +56,6 @@ to target system
 Services configured                  systemd services:
 and started                          - mouth.service
                                      - backlight.service
-                                     - mqtt.service
 ```
 
 ## Why This Approach?
@@ -105,10 +104,6 @@ This will:
   become: yes
   roles:
     - role: pi_eyes
-      vars:
-        pi_eyes_install_mqtt: true
-        pi_eyes_mqtt_host: mqtt.example.com
-        pi_eyes_robot_name: head1
 ```
 
 ### Step 4: Deploy
@@ -205,3 +200,6 @@ These are usually related to the base Snake Eyes installation, not this role:
 - Verify the Adafruit installation is working
 - Check display configuration in `/boot/config.txt`
 - See Adafruit troubleshooting guide
+
+
+Prepared HTTP playback is installed separately using [the stopped rollout procedure](../docs/head-http.md). This broad bootstrap role is not an upgrade procedure for preserved Nightweaver heads.

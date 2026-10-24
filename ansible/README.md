@@ -43,9 +43,6 @@ ansible-galaxy install -r requirements.yml -p roles/
   become: yes
   roles:
     - role: pi_eyes
-      vars:
-        pi_eyes_mqtt_host: mqtt.example.com
-        pi_eyes_robot_name: head1
 ```
 
 4. **Run the playbook:**
@@ -92,14 +89,15 @@ All configurable options are in `roles/pi_eyes/defaults/main.yml`. Override them
         pi_eyes_mouth_pwm_min: 90
         pi_eyes_mouth_pwm_max: 200
         pi_eyes_mouth_idle_position: 100
-        pi_eyes_install_mqtt: true
 ```
 
 ## Components Deployed
 
 - **Mouth Control**: Servo-based mouth with idle positioning and smooth easing
 - **Backlight Control**: PWM-based backlight control for eyes
-- **MQTT Service**: Animation daemon for remote control (optional)
 - **Eyes**: Snake Eyes animation system
 
 All components run as systemd services and can be independently enabled/disabled.
+
+
+Prepared HTTP playback is installed separately using [the stopped rollout procedure](../docs/head-http.md). This broad bootstrap role is not an upgrade procedure for preserved Nightweaver heads.

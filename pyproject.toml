@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pi-eyes-head"
+version = "1.0.0"
+requires-python = ">=3.9"
+dependencies = ["h11==0.16.0"]
+
+[tool.setuptools.packages.find]
+include = ["nightweaver_head*"]
+
+[tool.setuptools.package-data]
+nightweaver_head = ["contracts/*.json"]

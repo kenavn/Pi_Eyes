@@ -19,10 +19,3 @@
     state: restarted
   become: true
   when: pi_eyes_install_backlight
-
-- name: Restart mqtt service
-  ansible.builtin.systemd:
-    name: mqtt.service
-    state: restarted
-  become: true
-  when: pi_eyes_install_mqtt

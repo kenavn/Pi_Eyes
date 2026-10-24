@@ -46,7 +46,6 @@
   notify:
     - Restart mouth service
     - Restart backlight service
-    - Restart mqtt service
 
 - name: Make Python scripts executable
   ansible.builtin.file:
@@ -57,17 +56,6 @@
     - eyes.py
     - mouth.py
     - backlight.py
-    - editor/animationDaemon.py
-
-- name: Create animations directory for MQTT service
-  ansible.builtin.file:
-    path: "{{ pi_eyes_animations_dir }}"
-    state: directory
-    owner: "{{ pi_eyes_user }}"
-    group: "{{ pi_eyes_group }}"
-    mode: '0755'
-  become: true
-  when: pi_eyes_install_mqtt
 
 - name: Deploy mouth service
   ansible.builtin.template:
@@ -91,17 +79,6 @@
     - Reload systemd
     - Restart backlight service
 
-- name: Deploy MQTT service
-  ansible.builtin.template:
-    src: mqtt.service.j2
-    dest: /etc/systemd/system/mqtt.service
-    mode: '0644'
-  become: true
-  when: pi_eyes_install_mqtt
-  notify:
-    - Reload systemd
-    - Restart mqtt service
-
 - name: Enable and start mouth service
   ansible.builtin.systemd:
     name: mouth.service
@@ -119,12 +96,3 @@
     daemon_reload: true
   become: true
   when: pi_eyes_install_backlight
-
-- name: Enable and start MQTT service
-  ansible.builtin.systemd:
-    name: mqtt.service
-    enabled: true
-    state: started
-    daemon_reload: true
-  become: true
-  when: pi_eyes_install_mqtt

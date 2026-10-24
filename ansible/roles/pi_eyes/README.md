@@ -8,7 +8,6 @@ This role automates the installation and configuration of:
 - Snake Eyes animation system
 - Servo-controlled mouth system with idle positioning and easing
 - Backlight control (optional - disabled by default)
-- MQTT-based animation daemon (optional)
 
 ## Requirements
 
@@ -40,13 +39,11 @@ This Ansible role deploys the Pi_Eyes code on top of the Adafruit installation. 
 ```yaml
 # Installation paths
 pi_eyes_install_path: /boot/Pi_Eyes
-pi_eyes_animations_dir: /etc/anim
 
 # Service configuration - what to install
 pi_eyes_install_eyes: true
 pi_eyes_install_mouth: true
 pi_eyes_install_backlight: false  # Set to true if backlight hardware is installed
-pi_eyes_install_mqtt: false
 ```
 
 ### Mouth Servo Configuration
@@ -77,16 +74,6 @@ To enable backlight:
 pi_eyes_install_backlight: true
 ```
 
-### MQTT Configuration
-
-```yaml
-pi_eyes_mqtt_host: localhost
-pi_eyes_mqtt_port: 1883
-pi_eyes_mqtt_user: ""
-pi_eyes_mqtt_pass: ""
-pi_eyes_robot_name: head1
-```
-
 See `defaults/main.yml` for all available variables.
 
 ## Dependencies
@@ -112,11 +99,6 @@ None.
   roles:
     - role: pi_eyes
       vars:
-        pi_eyes_install_mqtt: true
-        pi_eyes_mqtt_host: mqtt.example.com
-        pi_eyes_mqtt_user: robot
-        pi_eyes_mqtt_pass: secret
-        pi_eyes_robot_name: head1
         pi_eyes_mouth_idle_position: 100
         pi_eyes_mouth_idle_timeout: 3.0
 ```
@@ -131,7 +113,6 @@ None.
       vars:
         pi_eyes_install_eyes: false
         pi_eyes_install_backlight: false
-        pi_eyes_install_mqtt: false
         pi_eyes_install_mouth: true
 ```
 
@@ -181,10 +162,6 @@ cp -r /tmp/pi_eyes/ansible/roles/pi_eyes roles/
   hosts: pi_eyes_hosts
   become: yes
 
-  vars:
-    pi_eyes_mqtt_host: mqtt.mydomain.com
-    pi_eyes_robot_name: skeleton_head
-
   roles:
     - pi_eyes
 ```
@@ -195,13 +172,11 @@ This role creates and manages the following systemd services:
 
 - `mouth.service` - Servo-controlled mouth with idle easing
 - `backlight.service` - Eye backlight control (if enabled)
-- `mqtt.service` - MQTT animation daemon (if enabled)
 
 Check service status:
 ```bash
 sudo systemctl status mouth.service
 sudo systemctl status backlight.service
-sudo systemctl status mqtt.service
 ```
 
 ## Hardware Requirements
@@ -218,3 +193,6 @@ MIT
 ## Author Information
 
 Created by Kenneth Avner for the Pi_Eyes animatronics project.
+
+
+Prepared HTTP playback is installed separately using [the stopped rollout procedure](../../../docs/head-http.md). This broad bootstrap role is not an upgrade procedure for preserved Nightweaver heads.

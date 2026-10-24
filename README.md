@@ -38,7 +38,7 @@ After enabling this service, we also need to add the mouth.py program to the sys
 1. Copy the `mouth.py` file into `/boot/Pi_Eyes/` folder on the Raspberry Pi
 2. Copy the `mouth.service` file into `/etc/systemd/system/` folder as well (you will need sudo)
 3. `sudo chmod +x /boot/Pi_Eyes/mouth.py`
-4. `sudo pip install paho.mqtt && sudo pip install bleak`
+4. `sudo pip install bleak`
 5. `sudo systemctl daemon-reload`
 6. `sudo systemctl enable mouth.service`
 7. `sudo systemctl start mouth.service`
@@ -65,17 +65,11 @@ To install the backlight service:
 You can check the status:
 `sudo systemctl status backlight.service`
 
-### Install the MQTT controller (optional)
+### Prepared head HTTP controller
 
-The head can have a MQTT client that connects to a MQTT server. It provides an interface
-to play animation bundles created by the animatronic editor. These need to be copied into the head
-so that they reside in a predefined folder.
-
-This is the main contact point from outside of the head, creating the interface to be able to
-let the head run a prerecorded sound file, mouth script and eyes script.
-
-_Full installation instructions in the README-MQTT.md file.
-Installation script will be made as soon as I have time._
+The authenticated HTTP service owns prepared bundle playback. See
+[the runtime and stopped installation handoff](docs/head-http.md). Do not use the
+bootstrap steps above to upgrade a preserved Nightweaver head.
 
 ### Install the remote control
 
@@ -93,7 +87,7 @@ Press the SHARE button on controller to start/stop recording.
 
 ### Install the Animatronics Studio
 
-A simple GUI is created to be able to record eye and mouth movement in separate sessions, and to create package files containing both sound and animation instructions. These files are used by the MQTT service (see above).
+A simple GUI is created to be able to record eye and mouth movement in separate sessions, and to create package files containing both sound and animation instructions. These files are inspected and delivered by the prepared HTTP service (see above).
 
 #### Quick Start (Recommended)
 
@@ -132,11 +126,15 @@ If you prefer to set up manually:
 
 #### How to use the package files
 
-After creating a package file with sound and animation, you need to upload it
-to the configured script folder of the MQTT service on your raspberry pi (the head). See the MQTT installation instructions.
-
-After that, it it just to send a MQTT message as described in README-MQTT.md and the animation should play as intended.
+After creating a `.skelanim` package, import its exact bytes into Nightweaver's
+managed Library. The controller delivers, verifies and prepares that immutable
+content through the authenticated HTTP contract before explicitly starting it.
+Copying a file into `/etc/anim` is read-only library inventory, not playback admission.
 
 ### HW Documentation from Adafruit
 
 https://learn.adafruit.com/animated-snake-eyes-bonnet-for-raspberry-pi/
+
+## Prepared head control
+
+The playback owner is the Python 3.9+ HTTP service documented in [docs/head-http.md](docs/head-http.md). The MQTT playback daemon and service have been removed. Existing eye/mouth UDP controllers, editor file format and lower-level setup are preserved. Installation requires a separately authorized, stopped rollout; the existing bootstrap instructions are not an HTTP upgrade procedure.
