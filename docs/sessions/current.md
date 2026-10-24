@@ -12,7 +12,10 @@ Python3.9.25 and3.14.4 with hash-pinned h11 0.16.0; compileall and git diff whit
 checks passed. Independent source review pass1/3 found two blockers: unclassified header ingress could
 occupy reserved capacity, and a published duplicate upload could clear another job
 reservation. Both are corrected with finite-burst loopback and exact A/B/C replay
-regressions. Pass2/3 and remote CI/landing remain coordinator gates; the count does not reset.
+regressions. Pass2/3 cleared both product fixes and required timer-controlled admission
+coverage. The regression now injects header timer callbacks and a fake service clock,
+proves dispatch before explicitly delivered expiry, then drives timeout/cleanup directly.
+Pass3/3 and remote CI/landing remain coordinator gates; the count does not reset.
 A one-off read-only inspection of privately captured hode1/hode2 archives matched
 independent Rust facts: audio81251834/79668105us, movement81245001/79639506us,
 8133/7934 movement rows. Those archives are not committed or required by tests.

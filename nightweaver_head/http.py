@@ -77,6 +77,9 @@ class HTTPServer:
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
+    def header_timer(self, delay, callback, *args):
+        return asyncio.get_running_loop().call_later(delay, callback, *args)
+
     async def read(self, reader, until, idle):
         remaining = until - time.monotonic()
         if remaining <= 0:
@@ -288,9 +291,8 @@ class HeaderIngress(asyncio.StreamReaderProtocol):
         super().connection_made(transport)
         self.writer = asyncio.StreamWriter(transport, self, self.reader, asyncio.get_running_loop())
         if self.server.accept(self):
-            loop = asyncio.get_running_loop()
-            self.absolute_timer = loop.call_later(self.server.deadline, self.reject, 408)
-            self.idle_timer = loop.call_later(self.server.idle, self.reject, 408)
+            self.absolute_timer = self.server.header_timer(self.server.deadline, self.reject, 408)
+            self.idle_timer = self.server.header_timer(self.server.idle, self.reject, 408)
 
     def cancel_timers(self):
         for timer in (self.absolute_timer, self.idle_timer):
@@ -332,7 +334,7 @@ class HeaderIngress(asyncio.StreamReaderProtocol):
                 return
             if self.idle_timer:
                 self.idle_timer.cancel()
-            self.idle_timer = asyncio.get_running_loop().call_later(self.server.idle, self.reject, 408)
+            self.idle_timer = self.server.header_timer(self.server.idle, self.reject, 408)
             return
         if end + 4 > 16384:
             self.reject(413)
