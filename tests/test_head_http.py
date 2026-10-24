@@ -176,3 +176,60 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         finally:
             gate.set()
             await pending
+
+    async def test_partial_header_burst_replaced_before_stop_and_renew_with_upload_held(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from nightweaver_head.http import HeaderIngress
+        opened_request, lease, owner = opened(self.service)
+        data = bundle()
+        managed = content(data)
+        Path(self.tmp.name, managed['identity']['sha256']).write_bytes(data)
+        self.service.prepare({'authority': authority(lease, owner, 1), 'content': managed,
+                              'expected_facts': inspect(data).facts, 'resume_auto': True, 'local_output_delay_us': 0})
+        await until(lambda: self.service.ordinary is None)
+        uploaded = b'held synthetic transfer bytes'
+        transfer = {'device_boot_id': self.service.boot, 'job_id': uid(), 'content': content(uploaded)}
+        self.assertEqual((await self.request('/device-content/v1/transfers/open', transfer))[0], 200)
+        upload_reader, upload_writer = await self.connect()
+        extras = f'Content-Type: application/octet-stream\r\nX-Device-Boot-Id: {self.service.boot}\r\n'.encode()
+        upload_writer.write(self.headers('PUT', '/device-content/v1/transfers/'+transfer['job_id']+'/bytes', len(uploaded), extras) + uploaded[:1])
+        await until(lambda: self.service.store.upload is not None and self.service.store.upload.count == 1)
+        held_upload = self.service.store.upload
+        partials = []
+        expiries = []
+        reject = HeaderIngress.reject
+        def observe_reject(ingress, status, reason='malformed'):
+            if status == 408:
+                expiries.append(ingress)
+            return reject(ingress, status, reason)
+        with patch.object(HeaderIngress, 'reject', observe_reject):
+            for _ in range(8):
+                reader, writer = await self.connect()
+                partials.append((reader, writer))
+                writer.write(b'POST /head-control/v1/status HTTP/1.1\r\n')
+                await writer.drain()
+                self.assertLessEqual(len(self.server.connections), 8)
+                self.assertLessEqual(len(self.server.pending_headers), 2)
+                self.assertLessEqual(len(self.server.tasks), 8)
+            await until(lambda: len(self.server.pending_headers) == 2 and all(reader.at_eof() for reader, _ in partials[:6]))
+            renewal = {'session': lease['session'], 'lease_token': lease['lease_token'], 'renewal_sequence': '1',
+                       'time_probe': opened_request['time_probe'], 'clock_mapping': None}
+            stop = {'authority': authority(lease, owner, 2), 'activity': activity(owner)}
+            responses = await asyncio.gather(self.request('/head-control/v1/stop', stop),
+                                             self.request('/head-control/v1/sessions/renew', renewal))
+            self.assertEqual([status for status, _ in responses], [200, 200])
+            self.assertEqual(responses[0][1]['settlement'], 'settled')
+            self.assertFalse(expiries, 'reserved dispatch must precede partial-header expiry')
+            self.assertIs(self.service.store.upload, held_upload)
+            self.assertEqual(self.service.store.active[0], transfer['job_id'])
+            self.assertLessEqual(len(self.server.tasks), 8)
+            self.assertLessEqual(len(self.server.pending_headers), 2)
+        upload_writer.write(uploaded[1:])
+        self.assertEqual((await self.reply(upload_reader))[1]['phase'], 'published')
+        # Finish every unknown connection now; its timers/tasks cannot outlive teardown.
+        for ingress in list(self.server.pending_headers.values()):
+            ingress.evict()
+        await until(lambda: not self.server.tasks)
+        self.assertFalse(self.server.pending_headers)
+        self.assertFalse(self.server.connections)

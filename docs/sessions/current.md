@@ -7,9 +7,12 @@ all eye/mouth/boot/display/pigpio/backlight/calibration implementations unchange
 Runtime/install handoff: [head-http.md](../head-http.md). Frozen schemas retain exact
 Nightweaver2c20956a1f9790d904a3ec5ea68fa12e90574650 provenance.
 
-Author validation:38 synthetic/fake-port/owned-loopback unittest cases passed on
+Author validation:40 synthetic/fake-port/owned-loopback unittest cases passed on
 Python3.9.25 and3.14.4 with hash-pinned h11 0.16.0; compileall and git diff whitespace
-checks passed. Independent source review and remote CI/landing remain coordinator gates.
+checks passed. Independent source review pass1/3 found two blockers: unclassified header ingress could
+occupy reserved capacity, and a published duplicate upload could clear another job
+reservation. Both are corrected with finite-burst loopback and exact A/B/C replay
+regressions. Pass2/3 and remote CI/landing remain coordinator gates; the count does not reset.
 A one-off read-only inspection of privately captured hode1/hode2 archives matched
 independent Rust facts: audio81251834/79668105us, movement81245001/79639506us,
 8133/7934 movement rows. Those archives are not committed or required by tests.

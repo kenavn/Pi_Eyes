@@ -29,8 +29,12 @@ compression, pipelining or chunked uploads. Plain HTTP is confined to the truste
 Ethernet; this does not claim transport encryption.
 
 The server has at most8 connections,6 ordinary connections, two concurrent observations,
-one Stop slot and one renewal slot. An unclassified connection has an absolute5s and
-idle1s header deadline. Control bodies are128KiB, aggregate headers16KiB, responses256KiB;
+one Stop slot and one renewal slot. At most two header-pending peers are evictable;
+an arrival replaces the oldest unknown peer immediately when that pool is full.
+Header parsing uses callbacks and bounded timers, creating a request task only after
+classification. Classified requests, Stop/renewal and admitted uploads are never evicted.
+This reserves dispatch through finite bursts of partial headers, not an infinite hostile
+connection flood. An unclassified connection has an absolute5s and idle1s header deadline. Control bodies are128KiB, aggregate headers16KiB, responses256KiB;
 ordinary request deadline5s, idle1s. Streamed upload deadline120s, idle5s. Uploads hash
 incrementally on a separate bounded filesystem owner. At most8 disk requests can remain
 pending, even if the filesystem stalls. Stop and lease expiry never wait for that owner.

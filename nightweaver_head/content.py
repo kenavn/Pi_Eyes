@@ -181,7 +181,8 @@ class ContentStore:
         if self.upload and self.upload.job == job:
             self.upload.abort()
         receipt.update(phase='failed', failure=reason)
-        self.active = None
+        if self.active and self.active[0] == job:
+            self.active = None
         return receipt
 
     def begin(self, job, boot, length):
@@ -244,8 +245,10 @@ class Upload:
             finally:
                 os.close(fd)
         self.receipt.update(phase='published', received_bytes=str(self.count), failure=None)
-        self.store.active = None
-        self.store.upload = None
+        if self.store.active and self.store.active[0] == self.job:
+            self.store.active = None
+        if self.store.upload is self:
+            self.store.upload = None
         return self.receipt
 
     def abort(self):
@@ -255,4 +258,5 @@ class Upload:
         if self.path:
             os.unlink(self.path)
             self.path = None
-        self.store.upload = None
+        if self.store.upload is self:
+            self.store.upload = None

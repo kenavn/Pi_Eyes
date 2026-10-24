@@ -6,6 +6,7 @@ import re
 import socket
 import time
 import uuid
+from collections import OrderedDict
 import h11
 from .wire import Refusal, decode
 
@@ -19,6 +20,7 @@ class HTTPServer:
             raise ValueError('invalid credential file')
         self.service, self.secret, self.bind, self.port = service, secret, bind, port
         self.connections = set()
+        self.pending_headers = OrderedDict()
         self.ordinary = 0
         self.observers = 0
         self.reserved = set()
@@ -31,18 +33,47 @@ class HTTPServer:
         self.bulk_idle = 5.0
 
     async def start(self):
-        # No StreamReader callback coroutine: reject excess sockets before task allocation.
-        self.server = await asyncio.start_server(self.accept, self.bind, self.port,
-                                                 family=socket.AF_INET, limit=16384)
+        # Pending headers use protocol callbacks/timers, never a task per unknown peer.
+        self.server = await asyncio.get_running_loop().create_server(
+            lambda: HeaderIngress(self), self.bind, self.port, family=socket.AF_INET)
         self.service.begin()
         return self.server.sockets[0].getsockname()
 
-    def accept(self, reader, writer):
-        if len(self.connections) >= 8:
-            writer.close()
-            return
-        self.connections.add(writer)
-        task = asyncio.create_task(self.handle(reader, writer))
+    def accept(self, ingress):
+        if len(self.pending_headers) >= 2 or len(self.connections) >= 8:
+            if self.pending_headers:
+                _, oldest = next(iter(self.pending_headers.items()))
+                oldest.evict()
+            else:
+                ingress.evict()
+                return False
+        self.connections.add(ingress.writer)
+        self.pending_headers[ingress.writer] = ingress
+        return True
+
+    def classify(self, path):
+        reserved = path in ('/head-control/v1/stop', '/head-control/v1/sessions/renew')
+        observation = path in ('/head-control/v1/status', '/head-control/v1/capabilities',
+                               '/head-control/v1/operations/lookup', '/device-content/v1/transfers/lookup')
+        if reserved:
+            if path in self.reserved:
+                raise Refusal('capacity', 429)
+            self.reserved.add(path)
+            return ('reserved', path)
+        if self.ordinary >= 6 or observation and self.observers >= 2:
+            raise Refusal('capacity', 429)
+        self.ordinary += 1
+        if observation:
+            self.observers += 1
+        return ('ordinary', observation)
+
+    def dispatch_connection(self, ingress, path):
+        # No await between classification and transfer from the evictable header pool.
+        classification = self.classify(path)
+        self.pending_headers.pop(ingress.writer)
+        ingress.classified = True
+        task = asyncio.create_task(self.handle(ingress.reader, ingress.writer,
+                                               classification, ingress.started))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
@@ -75,12 +106,10 @@ class HTTPServer:
         except asyncio.TimeoutError:
             raise Refusal('transfer_expired', 408) from None
 
-    async def handle(self, reader, writer):
+    async def handle(self, reader, writer, classification, started):
         codec = h11.Connection(h11.SERVER, max_incomplete_event_size=16384)
         upload = None
-        classification = None
         head_bytes = b''
-        started = time.monotonic()
         deadline = started + self.deadline
         try:
             # Count actual complete aggregate headers, including a complete giant header.
@@ -110,21 +139,6 @@ class HTTPServer:
                     or 'upgrade' in headers or 'expect' in headers
                     or headers.get('connection', '').lower() == 'upgrade'):
                 raise Refusal('malformed')
-            reserved = path in ('/head-control/v1/stop', '/head-control/v1/sessions/renew')
-            observation = path in ('/head-control/v1/status', '/head-control/v1/capabilities',
-                                   '/head-control/v1/operations/lookup', '/device-content/v1/transfers/lookup')
-            if reserved:
-                if path in self.reserved:
-                    raise Refusal('capacity', 429)
-                self.reserved.add(path)
-                classification = ('reserved', path)
-            else:
-                if self.ordinary >= 6 or observation and self.observers >= 2:
-                    raise Refusal('capacity', 429)
-                self.ordinary += 1
-                if observation:
-                    self.observers += 1
-                classification = ('ordinary', observation)
             text_length = headers.get('content-length', '0')
             if not re.fullmatch('0|[1-9][0-9]*', text_length) or len(text_length) > 20:
                 raise Refusal('malformed')
@@ -244,6 +258,8 @@ class HTTPServer:
     async def close(self):
         self.server.close()
         await self.server.wait_closed()
+        for ingress in list(self.pending_headers.values()):
+            ingress.evict()
         for writer in self.connections.copy():
             writer.close()
         if self.tasks:
@@ -254,3 +270,98 @@ class HTTPServer:
             except asyncio.TimeoutError:
                 return False
         return await self.service.shutdown()
+
+
+class HeaderIngress(asyncio.StreamReaderProtocol):
+    """Two replaceable unknown peers; classification alone allocates request tasks."""
+    def __init__(self, server):
+        self.server = server
+        self.reader = asyncio.StreamReader(limit=16384)
+        super().__init__(self.reader)
+        self.writer = None
+        self.started = time.monotonic()
+        self.buffer = bytearray()
+        self.classified = self.closed = False
+        self.absolute_timer = self.idle_timer = None
+
+    def connection_made(self, transport):
+        super().connection_made(transport)
+        self.writer = asyncio.StreamWriter(transport, self, self.reader, asyncio.get_running_loop())
+        if self.server.accept(self):
+            loop = asyncio.get_running_loop()
+            self.absolute_timer = loop.call_later(self.server.deadline, self.reject, 408)
+            self.idle_timer = loop.call_later(self.server.idle, self.reject, 408)
+
+    def cancel_timers(self):
+        for timer in (self.absolute_timer, self.idle_timer):
+            if timer:
+                timer.cancel()
+        self.absolute_timer = self.idle_timer = None
+
+    def evict(self):
+        if self.classified or self.closed:
+            return
+        self.closed = True
+        self.cancel_timers()
+        self.server.pending_headers.pop(self.writer, None)
+        self.server.connections.discard(self.writer)
+        self._transport.abort()
+
+    def reject(self, status, reason='malformed'):
+        if self.closed or self.classified:
+            return
+        data = json.dumps({'reason': reason}, separators=(',', ':')).encode()
+        self._transport.write(('HTTP/1.1 %d Error\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: %d\r\n\r\n' % (status, len(data))).encode() + data)
+        self.closed = True
+        self.cancel_timers()
+        self.server.pending_headers.pop(self.writer, None)
+        self.server.connections.discard(self.writer)
+        self._transport.close()
+
+    def data_received(self, data):
+        if self.closed:
+            return
+        if self.classified:
+            return super().data_received(data)
+        # Keep only a bounded header prefix until its class is known.
+        self.buffer.extend(data[:16388])
+        end = self.buffer.find(b'\r\n\r\n')
+        if end < 0:
+            if len(self.buffer) > 16384 or len(data) > 16388:
+                self.reject(413)
+                return
+            if self.idle_timer:
+                self.idle_timer.cancel()
+            self.idle_timer = asyncio.get_running_loop().call_later(self.server.idle, self.reject, 408)
+            return
+        if end + 4 > 16384:
+            self.reject(413)
+            return
+        try:
+            codec = h11.Connection(h11.SERVER, max_incomplete_event_size=16384)
+            codec.receive_data(bytes(self.buffer[:end+4]))
+            request = codec.next_event()
+            if not isinstance(request, h11.Request):
+                raise Refusal('malformed')
+            path = request.target.decode('ascii')
+            # Classification is non-authoritative: the handler still authenticates and
+            # validates all headers before admitting any operation or upload.
+            self.server.dispatch_connection(self, path)
+        except Refusal as error:
+            self.reject(error.status, error.reason)
+            return
+        except (h11.ProtocolError, UnicodeError):
+            self.reject(400)
+            return
+        self.cancel_timers()
+        # data may include body bytes: retain them exactly once through StreamReader.
+        prior = bytes(self.buffer[:-min(len(data), 16388)])
+        self.buffer.clear()
+        super().data_received(prior + data)
+
+    def connection_lost(self, exc):
+        self.cancel_timers()
+        if not self.classified:
+            self.server.pending_headers.pop(self.writer, None)
+            self.server.connections.discard(self.writer)
+        super().connection_lost(exc)

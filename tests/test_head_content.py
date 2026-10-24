@@ -91,3 +91,39 @@ class ContentTests(unittest.TestCase):
             receipt = self.store.open(self.request)
             self.assertEqual(receipt['phase'], 'receiving')
             self.assertEqual(source.read_bytes(), self.data)
+
+    def test_published_duplicate_cannot_release_another_job_reservation(self):
+        self.store.open(self.request)
+        first = self.store.begin(self.request['job_id'], self.store.boot, len(self.data))
+        first.write(self.data)
+        first.finish()
+        for terminal in ('cancelled', 'transfer_expired'):
+            with self.subTest(terminal=terminal):
+                receiving = {'device_boot_id': self.store.boot, 'job_id': uid(), 'content': content(b'next bytes')}
+                self.store.open(receiving)
+                reserved = self.store.active
+                duplicate = self.store.begin(self.request['job_id'], self.store.boot, len(self.data))
+                duplicate.write(self.data)
+                duplicate.finish()
+                self.assertEqual(self.store.active, reserved)
+                candidate = {'device_boot_id': self.store.boot, 'job_id': uid(), 'content': content(b'third bytes')}
+                with self.assertRaisesRegex(Refusal, 'capacity'):
+                    self.store.open(candidate)
+                if terminal == 'cancelled':
+                    self.store.fail(receiving['job_id'], terminal)
+                else:
+                    self.clock.value = reserved[1]
+                    self.store.expire()
+                self.assertIsNone(self.store.active)
+                self.assertEqual(self.store.open(receiving)['failure'], terminal)
+                self.assertIsNone(self.store.active)
+                self.store.open(candidate)
+                successor = self.store.active
+                # Replays of both terminal paths cannot release the successor either.
+                duplicate.finish()
+                duplicate.abort()
+                self.store.fail(receiving['job_id'], terminal)
+                self.assertEqual(self.store.active, successor)
+                self.assertEqual(self.store.open(self.request)['phase'], 'published')
+                self.assertEqual(self.store.active, successor)
+                self.store.fail(candidate['job_id'], 'cancelled')
