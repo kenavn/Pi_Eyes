@@ -17,14 +17,7 @@
     pi_eyes_install_eyes: true
     pi_eyes_install_mouth: true
     pi_eyes_install_backlight: false  # Set to true if backlight hardware is installed
-    pi_eyes_install_mqtt: true
 
-    # MQTT configuration
-    pi_eyes_mqtt_host: mqtt.example.com
-    pi_eyes_mqtt_port: 1883
-    pi_eyes_mqtt_user: robot
-    pi_eyes_mqtt_pass: secret
-    pi_eyes_robot_name: head1
 
     # Mouth servo tuning
     pi_eyes_mouth_idle_position: 128
@@ -43,7 +36,6 @@
       loop:
         - mouth.service
         - backlight.service
-        - mqtt.service
 
     - name: Display service status
       debug:

@@ -1,0 +1,1275 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Contracts",
+  "type": "object",
+  "properties": {
+    "capabilities": {
+      "$ref": "#/$defs/Capabilities"
+    },
+    "close": {
+      "$ref": "#/$defs/CloseSession"
+    },
+    "closed": {
+      "$ref": "#/$defs/SessionClosed"
+    },
+    "error": {
+      "$ref": "#/$defs/ErrorResponse"
+    },
+    "inspect": {
+      "$ref": "#/$defs/InspectRequest"
+    },
+    "inspect_result": {
+      "$ref": "#/$defs/InspectResult"
+    },
+    "lease": {
+      "$ref": "#/$defs/SessionLease"
+    },
+    "open": {
+      "$ref": "#/$defs/OpenSession"
+    },
+    "prepare": {
+      "$ref": "#/$defs/PrepareRequest"
+    },
+    "prepared": {
+      "$ref": "#/$defs/PreparedBundle"
+    },
+    "query": {
+      "$ref": "#/$defs/OperationIdentity"
+    },
+    "renew": {
+      "$ref": "#/$defs/RenewSession"
+    },
+    "result": {
+      "$ref": "#/$defs/OperationResult"
+    },
+    "start": {
+      "$ref": "#/$defs/StartRequest"
+    },
+    "status": {
+      "$ref": "#/$defs/Status"
+    },
+    "status_query": {
+      "$ref": "#/$defs/StatusQuery"
+    },
+    "stop": {
+      "$ref": "#/$defs/StopRequest"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "open",
+    "renew",
+    "lease",
+    "close",
+    "closed",
+    "prepare",
+    "prepared",
+    "start",
+    "stop",
+    "query",
+    "status_query",
+    "result",
+    "status",
+    "capabilities",
+    "inspect",
+    "inspect_result",
+    "error"
+  ],
+  "$defs": {
+    "ActivityIdentity": {
+      "type": "object",
+      "properties": {
+        "cancellation_generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "occurrence": {
+          "$ref": "#/$defs/Occurrence"
+        },
+        "owner": {
+          "$ref": "#/$defs/Owner"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "occurrence",
+        "cancellation_generation"
+      ]
+    },
+    "At": {
+      "description": "An emission instant in Host time: the client acts so that its output for\nthe request's position is emitted at `host_us`. Requests carry it only\nfor a synchronised client; null means act on receipt.",
+      "type": "object",
+      "properties": {
+        "epoch": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "host_us": {
+          "$ref": "#/$defs/Counter"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "epoch",
+        "host_us"
+      ]
+    },
+    "AudioEncoding": {
+      "type": "string",
+      "enum": [
+        "pcm_s16_le",
+        "float32_le"
+      ]
+    },
+    "AudioPath": {
+      "type": "object",
+      "properties": {
+        "channels": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "sample_rate": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "sink_name": {
+          "$ref": "#/$defs/Label"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sink_name",
+        "sample_rate",
+        "channels"
+      ]
+    },
+    "Authority": {
+      "type": "object",
+      "properties": {
+        "lease_token": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "operation_revision": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "owner": {
+          "$ref": "#/$defs/Owner"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionIdentity"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "lease_token",
+        "operation_revision",
+        "owner"
+      ]
+    },
+    "BundleAudioFacts": {
+      "type": "object",
+      "properties": {
+        "channels": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 2,
+          "minimum": 1
+        },
+        "encoding": {
+          "$ref": "#/$defs/AudioEncoding"
+        },
+        "frames": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "sample_rate": {
+          "type": "integer",
+          "format": "uint32",
+          "maximum": 192000,
+          "minimum": 8000
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "encoding",
+        "frames",
+        "sample_rate",
+        "channels"
+      ]
+    },
+    "BundleFactsFields": {
+      "type": "object",
+      "properties": {
+        "audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BundleAudioFacts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "audio_extent_us": {
+          "$ref": "#/$defs/Counter"
+        },
+        "has_eye_motion": {
+          "type": "boolean"
+        },
+        "has_mouth_motion": {
+          "type": "boolean"
+        },
+        "logical_extent_us": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "movement_extent_us": {
+          "$ref": "#/$defs/Counter"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "audio",
+        "audio_extent_us",
+        "movement_extent_us",
+        "logical_extent_us",
+        "has_eye_motion",
+        "has_mouth_motion"
+      ]
+    },
+    "Capabilities": {
+      "type": "object",
+      "properties": {
+        "audio_less": {
+          "type": "boolean"
+        },
+        "audio_path": {
+          "$ref": "#/$defs/AudioPath"
+        },
+        "audio_ready": {
+          "type": "boolean"
+        },
+        "build_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "capacities": {
+          "$ref": "#/$defs/Capacities"
+        },
+        "device_boot_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "eyes": {
+          "type": "boolean"
+        },
+        "float_wav": {
+          "type": "boolean"
+        },
+        "long_play_rate_following": {
+          "type": "boolean"
+        },
+        "mouth": {
+          "type": "boolean"
+        },
+        "pcm_wav": {
+          "type": "boolean"
+        },
+        "protocol_version": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 1,
+          "minimum": 1
+        },
+        "restoration_action_time_us": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resume_auto": {
+          "type": "boolean"
+        },
+        "scheduled_start": {
+          "type": "boolean"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/Label"
+        },
+        "start_action_time_us": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "device_boot_id",
+        "source_revision",
+        "build_sha256",
+        "eyes",
+        "mouth",
+        "resume_auto",
+        "pcm_wav",
+        "float_wav",
+        "audio_less",
+        "scheduled_start",
+        "long_play_rate_following",
+        "audio_ready",
+        "audio_path",
+        "capacities",
+        "start_action_time_us",
+        "restoration_action_time_us"
+      ]
+    },
+    "Capacities": {
+      "type": "object",
+      "properties": {
+        "bundle_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "ordinary_jobs": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "prepared_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "prepared_handles": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "receipts": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "sessions": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "start_tombstones": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "store_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "workers": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessions",
+        "workers",
+        "ordinary_jobs",
+        "prepared_handles",
+        "receipts",
+        "start_tombstones",
+        "bundle_bytes",
+        "store_bytes",
+        "prepared_bytes"
+      ]
+    },
+    "ClockMapping": {
+      "description": "Host → client, on every session open and renewal once the Host has an\nestimate of that client: the integer mapping from Host time to the\nclient's local monotonic clock. Not a command: it has no revision, receipt\nor authority; within one `epoch` the newest `mapping_seq` wins and an older\none is never applied.",
+      "type": "object",
+      "properties": {
+        "epoch": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "mapping_seq": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "rate_ppb": {
+          "description": "Client clock rate against Host time.",
+          "$ref": "#/$defs/MappingRatePpb"
+        },
+        "ref_host_us": {
+          "description": "Host instant of the reference pair.",
+          "$ref": "#/$defs/Counter"
+        },
+        "ref_local_us": {
+          "description": "The client's local monotonic time at `ref_host_us`.",
+          "$ref": "#/$defs/Counter"
+        },
+        "state": {
+          "$ref": "#/$defs/SyncState"
+        },
+        "uncertainty_us": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "epoch",
+        "mapping_seq",
+        "ref_host_us",
+        "ref_local_us",
+        "rate_ppb",
+        "uncertainty_us",
+        "state"
+      ]
+    },
+    "ClockUse": {
+      "type": "string",
+      "enum": [
+        "mapped",
+        "no_clock"
+      ]
+    },
+    "CloseSession": {
+      "type": "object",
+      "properties": {
+        "lease_token": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionIdentity"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "lease_token"
+      ]
+    },
+    "CommandId": {
+      "type": "object",
+      "properties": {
+        "nonce": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "window_sequence": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "window_sequence",
+        "nonce"
+      ]
+    },
+    "CommandRef": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/CommandId"
+        },
+        "process_epoch": {
+          "$ref": "#/$defs/NonNilUuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "process_epoch",
+        "command"
+      ]
+    },
+    "ContentIdentity": {
+      "type": "object",
+      "properties": {
+        "length": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "length"
+      ]
+    },
+    "Counter": {
+      "type": "string",
+      "maxLength": 19,
+      "pattern": "^([1-9][0-9]{0,17}|9223372036854775807|0|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0})$"
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/Failure"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "reason"
+      ]
+    },
+    "Failure": {
+      "type": "string",
+      "enum": [
+        "unauthenticated",
+        "malformed",
+        "unsupported_protocol",
+        "unsupported_operation",
+        "unsupported_media",
+        "content_missing",
+        "content_mismatch",
+        "audio_unavailable",
+        "worker_failure",
+        "capacity",
+        "identity_conflict",
+        "revision_conflict",
+        "stale_revision",
+        "stale_owner",
+        "wrong_activity",
+        "owner_retired",
+        "expired_session",
+        "outcome_unavailable",
+        "unknown_outcome",
+        "timebase_epoch_mismatch",
+        "output_owned",
+        "late",
+        "cancelled",
+        "extent_mismatch",
+        "insufficient_tail_space",
+        "prior_worker_unsettled",
+        "shutting_down"
+      ]
+    },
+    "InspectRequest": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/ContentIdentity"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "content"
+      ]
+    },
+    "InspectResult": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/ContentIdentity"
+        },
+        "facts": {
+          "$ref": "#/$defs/BundleFactsFields"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "content",
+        "facts"
+      ]
+    },
+    "Label": {
+      "description": "Bounded printable ASCII fact reported by the player (codec, profile,\ncontainer, pixel format). Never a path, URL or credential carrier.",
+      "type": "string",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[ -.0-~]{1,64}$"
+    },
+    "LoadedProjectRef": {
+      "type": "object",
+      "properties": {
+        "context_generation": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "project": {
+          "$ref": "#/$defs/ProjectRef"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project",
+        "context_generation"
+      ]
+    },
+    "LocalOutputDelayUs": {
+      "description": "Signed local output delay in microseconds (timebase D12), bounded to\n+-5 s: the Host computes it, the agent applies it.",
+      "type": "integer",
+      "format": "int32",
+      "maximum": 5000000,
+      "minimum": -5000000
+    },
+    "ManagedContent": {
+      "type": "object",
+      "properties": {
+        "asset_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/ContentIdentity"
+        },
+        "version_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "version_id",
+        "identity"
+      ]
+    },
+    "MappingRatePpb": {
+      "type": "integer",
+      "format": "int32",
+      "maximum": 1000000,
+      "minimum": -1000000
+    },
+    "NonNilUuid": {
+      "type": "string",
+      "format": "uuid",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "Occurrence": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OccurrenceStep"
+          },
+          "maxItems": 32
+        },
+        "root_repeat_index": {
+          "$ref": "#/$defs/Counter"
+        },
+        "use_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "use_id",
+        "path",
+        "root_repeat_index"
+      ]
+    },
+    "OccurrenceStep": {
+      "type": "object",
+      "properties": {
+        "clip_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "repeat_index": {
+          "$ref": "#/$defs/Counter"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "clip_id",
+        "repeat_index"
+      ]
+    },
+    "OpenSession": {
+      "type": "object",
+      "properties": {
+        "clock_mapping": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClockMapping"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coordinator_epoch": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "device_boot_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "handshake_nonce": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "protocol_version": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 1,
+          "minimum": 1
+        },
+        "time_probe": {
+          "$ref": "#/$defs/TimeProbe"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "device_boot_id",
+        "coordinator_epoch",
+        "handshake_nonce",
+        "time_probe",
+        "clock_mapping"
+      ]
+    },
+    "OperationIdentity": {
+      "type": "object",
+      "properties": {
+        "operation_revision": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "owner": {
+          "$ref": "#/$defs/Owner"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionIdentity"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "owner",
+        "operation_revision"
+      ]
+    },
+    "OperationResult": {
+      "type": "object",
+      "properties": {
+        "activity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActivityIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "audio_position_us": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Counter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clock_use": {
+          "$ref": "#/$defs/ClockUse"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Failure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observed_local_us": {
+          "$ref": "#/$defs/Counter"
+        },
+        "operation": {
+          "description": "Public operation identity; never echo the secret lease token in status.",
+          "$ref": "#/$defs/OperationIdentity"
+        },
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "prepared": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreparedBundle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settlement": {
+          "$ref": "#/$defs/Settlement"
+        },
+        "terminal_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "phase",
+        "settlement",
+        "activity",
+        "prepared",
+        "terminal_reason",
+        "failure",
+        "clock_use",
+        "observed_local_us",
+        "audio_position_us"
+      ]
+    },
+    "Owner": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/CommandRef"
+        },
+        "coordinator_epoch": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "device_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "loaded": {
+          "$ref": "#/$defs/LoadedProjectRef"
+        },
+        "participant_generation": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "play_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "role_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "run_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "stage_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "coordinator_epoch",
+        "loaded",
+        "stage_id",
+        "play_id",
+        "run_id",
+        "device_id",
+        "role_id",
+        "participant_generation"
+      ]
+    },
+    "Phase": {
+      "type": "string",
+      "enum": [
+        "prepared",
+        "starting",
+        "running",
+        "stopping",
+        "settled",
+        "unknown"
+      ]
+    },
+    "PositiveCounter": {
+      "type": "string",
+      "maxLength": 19,
+      "pattern": "^([1-9][0-9]{0,17}|9223372036854775807|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0})$"
+    },
+    "PrepareRequest": {
+      "type": "object",
+      "properties": {
+        "authority": {
+          "$ref": "#/$defs/Authority"
+        },
+        "content": {
+          "$ref": "#/$defs/ManagedContent"
+        },
+        "expected_facts": {
+          "$ref": "#/$defs/BundleFactsFields"
+        },
+        "local_output_delay_us": {
+          "$ref": "#/$defs/LocalOutputDelayUs"
+        },
+        "resume_auto": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "authority",
+        "content",
+        "expected_facts",
+        "resume_auto",
+        "local_output_delay_us"
+      ]
+    },
+    "PreparedBundle": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/ManagedContent"
+        },
+        "facts": {
+          "$ref": "#/$defs/BundleFactsFields"
+        },
+        "handle_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "local_output_delay_us": {
+          "$ref": "#/$defs/LocalOutputDelayUs"
+        },
+        "owner": {
+          "$ref": "#/$defs/Owner"
+        },
+        "physical_occupancy_us": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "resume_auto": {
+          "type": "boolean"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionIdentity"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "handle_id",
+        "session",
+        "owner",
+        "content",
+        "facts",
+        "resume_auto",
+        "local_output_delay_us",
+        "physical_occupancy_us"
+      ]
+    },
+    "ProjectRef": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "revision"
+      ]
+    },
+    "RenewSession": {
+      "type": "object",
+      "properties": {
+        "clock_mapping": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClockMapping"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lease_token": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "renewal_sequence": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionIdentity"
+        },
+        "time_probe": {
+          "$ref": "#/$defs/TimeProbe"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "lease_token",
+        "renewal_sequence",
+        "time_probe",
+        "clock_mapping"
+      ]
+    },
+    "SessionClosed": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionIdentity"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session"
+      ]
+    },
+    "SessionIdentity": {
+      "type": "object",
+      "properties": {
+        "device_boot_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "session_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "device_boot_id",
+        "session_id"
+      ]
+    },
+    "SessionLease": {
+      "type": "object",
+      "properties": {
+        "handshake_nonce": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "lease_token": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "remaining_lease_us": {
+          "$ref": "#/$defs/Counter"
+        },
+        "renew_after_us": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionIdentity"
+        },
+        "time_reply": {
+          "$ref": "#/$defs/TimeReply"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "lease_token",
+        "handshake_nonce",
+        "remaining_lease_us",
+        "renew_after_us",
+        "time_reply"
+      ]
+    },
+    "Settlement": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "settled",
+        "unknown"
+      ]
+    },
+    "StartRequest": {
+      "type": "object",
+      "properties": {
+        "activity": {
+          "$ref": "#/$defs/ActivityIdentity"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/At"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authority": {
+          "$ref": "#/$defs/Authority"
+        },
+        "lateness_allowance_us": {
+          "$ref": "#/$defs/Counter"
+        },
+        "local_output_delay_us": {
+          "$ref": "#/$defs/LocalOutputDelayUs"
+        },
+        "prepared_handle_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "authority",
+        "activity",
+        "prepared_handle_id",
+        "at",
+        "lateness_allowance_us",
+        "local_output_delay_us"
+      ]
+    },
+    "Status": {
+      "type": "object",
+      "properties": {
+        "audio_ready": {
+          "type": "boolean"
+        },
+        "challenge": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "clock_mapping": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClockMapping"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "device_boot_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "observation_sequence": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OperationResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Owner"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "device_boot_id",
+        "challenge",
+        "observation_sequence",
+        "session",
+        "owner",
+        "operation",
+        "audio_ready",
+        "clock_mapping"
+      ]
+    },
+    "StatusQuery": {
+      "type": "object",
+      "properties": {
+        "challenge": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "device_boot_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "device_boot_id",
+        "challenge"
+      ]
+    },
+    "StopRequest": {
+      "type": "object",
+      "properties": {
+        "activity": {
+          "$ref": "#/$defs/ActivityIdentity"
+        },
+        "authority": {
+          "$ref": "#/$defs/Authority"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "authority",
+        "activity"
+      ]
+    },
+    "SyncState": {
+      "description": "Estimator state for one client boot in this Host epoch.",
+      "type": "string",
+      "enum": [
+        "unsynchronised",
+        "acquiring",
+        "ready",
+        "degraded",
+        "faulted"
+      ]
+    },
+    "TerminalReason": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "stopped",
+        "lease_expired",
+        "failed"
+      ]
+    },
+    "TimeProbe": {
+      "description": "Host → client. `host_send_us` is Host time stamped immediately before the\nrequest bytes are written; `epoch` is the Host process epoch.",
+      "type": "object",
+      "properties": {
+        "epoch": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "host_send_us": {
+          "$ref": "#/$defs/Counter"
+        },
+        "probe_seq": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "epoch",
+        "probe_seq",
+        "host_send_us"
+      ]
+    },
+    "TimeReply": {
+      "description": "Client → Host: the echoed probe and the client's local monotonic receive\nand send instants (Linux `CLOCK_MONOTONIC_RAW`, microseconds) for one\nclient boot.",
+      "type": "object",
+      "properties": {
+        "client_boot_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "client_recv_us": {
+          "$ref": "#/$defs/Counter"
+        },
+        "client_send_us": {
+          "$ref": "#/$defs/Counter"
+        },
+        "epoch": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "host_send_us": {
+          "$ref": "#/$defs/Counter"
+        },
+        "probe_seq": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "epoch",
+        "probe_seq",
+        "host_send_us",
+        "client_boot_id",
+        "client_recv_us",
+        "client_send_us"
+      ]
+    }
+  }
+}

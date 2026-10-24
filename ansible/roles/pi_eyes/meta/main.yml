@@ -25,7 +25,6 @@ galaxy_info:
     - iot
     - robotics
     - servo
-    - mqtt
 
 dependencies:
   - role: ansible.posix

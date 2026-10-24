@@ -1,0 +1,2 @@
+# Python >=3.9. Runtime intentionally has no transitive dependencies.
+h11==0.16.0 --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86

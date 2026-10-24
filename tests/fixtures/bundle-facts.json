@@ -1,0 +1,6 @@
+[
+ {"name":"float-stereo-a","encoding":"float32_le","frames":3900088,"sample_rate":48000,"channels":2,"last_time_ms":"81245.00048828125","audio_extent_us":81251834,"movement_extent_us":81245001,"logical_extent_us":81251834},
+ {"name":"float-stereo-b","encoding":"float32_le","frames":3824069,"sample_rate":48000,"channels":2,"last_time_ms":null,"audio_extent_us":79668105,"movement_extent_us":0,"logical_extent_us":79668105},
+ {"name":"pcm-mono","encoding":"pcm_s16_le","frames":1886277,"sample_rate":44100,"channels":1,"last_time_ms":null,"audio_extent_us":42772722,"movement_extent_us":0,"logical_extent_us":42772722},
+ {"name":"movement-zero","encoding":null,"frames":0,"sample_rate":0,"channels":0,"last_time_ms":"0","audio_extent_us":0,"movement_extent_us":1,"logical_extent_us":1}
+]
