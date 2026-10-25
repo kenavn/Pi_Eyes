@@ -124,6 +124,9 @@ class ProgramPlayer:
 
 class PygamePorts:
     """Lazy production adapter; sole output owner selects during quiet setup."""
+    # Installed SDL 1.2's streaming WAV decoder accepts native PCM16, not IEEE
+    # float WAV. Authored float inputs are normalized during setup, not at Cue.
+    native_encodings = ('pcm_s16_le',)
     def __init__(self, sink_name, eye_port=5005, mouth_port=5006, route_check=None):
         self.sink_name, self.eye_port, self.mouth_port = sink_name, eye_port, mouth_port
         self.route_check = route_check

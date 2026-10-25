@@ -137,6 +137,9 @@
               "type": "string",
               "const": "prepared_program"
             },
+            "play_id": {
+              "$ref": "#/$defs/NonNilUuid"
+            },
             "preparation_id": {
               "$ref": "#/$defs/NonNilUuid"
             },
@@ -150,6 +153,7 @@
             "preparation_id",
             "ready_set_revision",
             "device_id",
+            "play_id",
             "identity"
           ]
         }

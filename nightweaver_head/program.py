@@ -2,10 +2,13 @@
 import io
 import stat
 import struct
+import wave
 import zipfile
 from dataclasses import dataclass
 from fractions import Fraction
-from .bundle import MAX_BUNDLE, MAX_EXPANDED, MAX_EXTENT, wav_facts, unsupported
+from .bundle import MAX_EXTENT, wav_facts, unsupported
+from .program_limits import (PROGRAM_BYTES, EXPANDED_PROGRAM_BYTES, PREPARED_BYTES,
+                             MANIFEST_PARSE_BYTES, program_reservation)
 from .wire import decode, validate, Refusal
 
 
@@ -25,9 +28,11 @@ class Program:
     reservation: int
 
 
-def inspect_program(data, local_output_delay_us=None):
-    if len(data) > MAX_BUNDLE:
+def inspect_program(data, local_output_delay_us=None, available_bytes=PREPARED_BYTES):
+    if len(data) > PROGRAM_BYTES:
         unsupported()
+    if len(data) + MANIFEST_PARSE_BYTES > available_bytes:
+        raise Refusal('capacity', 429)
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             infos = archive.infolist()
@@ -38,7 +43,7 @@ def inspect_program(data, local_output_delay_us=None):
             for info in infos:
                 total += info.file_size
                 if (info.flag_bits & 1 or info.compress_type not in (0, 8) or info.is_dir()
-                        or stat.S_ISLNK(info.external_attr >> 16) or total > MAX_EXPANDED
+                        or stat.S_ISLNK(info.external_attr >> 16) or total > EXPANDED_PROGRAM_BYTES
                         or info.file_size > max(1, info.compress_size) * 1000
                         or info.filename == 'manifest.json' and info.file_size > 1048576):
                     unsupported()
@@ -46,6 +51,9 @@ def inspect_program(data, local_output_delay_us=None):
             duration, uses = int(manifest['duration_us']), manifest['uses']
             if duration > MAX_EXTENT or int(manifest['event_count']) > 100000:
                 unsupported()
+            sizes = {info.filename: info.file_size for info in infos}
+            reservation = program_reservation(manifest, len(data), sizes.get('audio.dat', 0),
+                                              sizes['events.jsonl'], available_bytes)
             previous, identities = Fraction(0), set()
             for index, use in enumerate(uses):
                 start, end = coordinate(use['start']), coordinate(use['end'])
@@ -155,7 +163,7 @@ def inspect_program(data, local_output_delay_us=None):
             facts = {'duration_us': manifest['duration_us'], 'audio': manifest['audio'],
                      'has_eye_motion': eyes, 'has_mouth_motion': mouths,
                      'uses': str(len(uses)), 'event_count': str(len(events))}
-            return Program(facts, manifest, tuple(events), audio, total)
+            return Program(facts, manifest, tuple(events), audio, reservation)
     except (zipfile.BadZipFile, KeyError, UnicodeError, ValueError, OverflowError, RuntimeError):
         unsupported()
 
@@ -171,6 +179,23 @@ def compile_source(bundle, delay_us=0, resume_auto=True):
     def time(us):
         return {'whole_us': str(us), 'numerator': '0', 'denominator': '1'}
     delay = max(0, delay_us)
+    audio, audio_facts = bundle.audio, bundle.facts['audio']
+    if audio and audio_facts['encoding'] == 'float32_le':
+        # Local authoring uses the same native PCM16 output contract as the
+        # device mixer. Keep source facts immutable and preserve channel order.
+        _, _, samples = wav_facts(audio)
+        pcm = bytearray(len(samples) // 2)
+        for index, (sample,) in enumerate(struct.iter_unpack('<f', samples)):
+            value = max(-32768, min(32767, round(sample * 32768)))
+            struct.pack_into('<h', pcm, index * 2, value)
+        stream = io.BytesIO()
+        with wave.open(stream, 'wb') as output:
+            output.setnchannels(audio_facts['channels'])
+            output.setsampwidth(2)
+            output.setframerate(audio_facts['sample_rate'])
+            output.writeframes(pcm)
+        audio = stream.getvalue()
+        audio_facts, _, _ = wav_facts(audio)
     extent = max(int(bundle.facts['audio_extent_us']),
                  int(bundle.facts['movement_extent_us']) + delay if bundle.frames else 0)
     use = {'id': '0', 'role_id': str(uuid.uuid4()),
@@ -190,8 +215,8 @@ def compile_source(bundle, delay_us=0, resume_auto=True):
         events.append((Fraction(at), {'at': time(at), 'use_id': '0', 'event': payload}))
     events.append((Fraction(extent), {'at': time(extent), 'use_id': '0', 'event': {'kind': 'end'}}))
     manifest = {'format': 'nightweaver_head_program_1', 'duration_us': str(extent),
-                'audio': bundle.facts['audio'], 'uses': [use], 'event_count': str(len(events))}
-    facts = {'duration_us': str(extent), 'audio': bundle.facts['audio'],
+                'audio': audio_facts, 'uses': [use], 'event_count': str(len(events))}
+    facts = {'duration_us': str(extent), 'audio': audio_facts,
              'has_eye_motion': bundle.facts['has_eye_motion'], 'has_mouth_motion': bundle.facts['has_mouth_motion'],
              'uses': '1', 'event_count': str(len(events))}
-    return Program(facts, manifest, tuple(events), bundle.audio, bundle.reservation)
+    return Program(facts, manifest, tuple(events), audio, bundle.reservation + len(audio))

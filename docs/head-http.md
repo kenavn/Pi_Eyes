@@ -171,21 +171,27 @@ generated program bytes have no invented managed asset/version identity.
 
 The replacement removes the subprocess verifier and per-occurrence BundlePlayer.
 Source ingestion remains solely for import inspection and the explicitly required
-local authoring maintenance CLI. Program archives are bounded to64MiB compressed,
+local authoring maintenance CLI. Generated program archives are bounded to128MiB compressed,
 256MiB expanded,1024 uses and100000 events; manifest metadata is at most1MiB and
-one event line at most4KiB. Prepared archive/audio reservations remain at most256MiB.
-Native source audio accepts PCM16 or finite float32, mono/stereo,8000..192000Hz.
+one event line at most4KiB. Prepared archive/audio reservations remain at most256MiB, including conservative
+metadata and parsing peak charges checked before payload expansion. Raw authoring
+bundles retain their separate64MiB limit.
+Authored audio accepts PCM16 or finite float32, mono/stereo,8000..192000Hz.
+The SDL1.2 native endpoint advertises PCM16 only; Host Setup must normalize
+float32 before transfer. The local maintenance compiler likewise converts float32
+to clipped PCM16 during preparation, preserving rate and channel order.
 One common format is explicit in the immutable program; the endpoint does not convert
 heterogeneous source formats or invent managed versions for prepared bytes.
 
 Author validation uses the private existing Python3.9.25 and3.14.6 peer environments
-with h11 installed:48 head tests pass on each. Coverage includes closed archive/wire
+with h11 installed; final follow-up validation is recorded separately. Coverage includes closed archive/wire
 validation, complete source identities and captured delay, exact fractional boundaries,
 gaps and final modes, source import, retained native selection without setup output,
 Stop/repeat/Disarm, stale activity rejection, held native preparation/restoration/
 disposal joins, expiry, unknown cleanup, reserved HTTP capacity and the real UDP eye
-consumer's0x45 release. Compileall and whitespace checks pass. All three vendored
-schemas match frozen Nightweaver `a8991e1` byte-for-byte. These are author checks;
+consumer's0x45 release. Compileall and whitespace checks pass. Vendored control/content schemas follow the required play binding, activation
+generation and distinct program capacity in Nightweaver `e7c4150`; program schema
+remains frozen at `a8991e1`. These are author checks;
 independent review, cross-language integrated acceptance and installed native/physical
 qualification remain separate coordinator gates. No device output or deployment was
 performed for these tests.
@@ -204,3 +210,16 @@ mono/stereo PCM/float gaps/tails are refused. The actual N449 Rust encoder's syn
 250µs/two-use/six-event PCM16 archive passes this stricter Python consumer on both
 supported test runtimes. These corrections do not reset the three-pass review ledger
 or establish native target qualification.
+
+The final follow-up binds every prepared program to its captured play. A monotonic
+activation generation identifies one actual run/cue lease across all root repeats.
+Stop retires that entire lease, including a queued repeat while an older repeat is
+still joining; stale commands cannot affect the next lease. Bounded generation and
+repeat watermarks replace accumulated UUID tombstones. Pre-start cancellation can
+cross the former4096-entry ceiling without native output or a service restart.
+These source changes require a matching Host deployment; they are not compatibility
+paths for the installed older protocol.
+
+Final follow-up author validation:59 head tests pass on both Python3.9.25 and
+3.14.6, including queued-repeat cancellation and conservative event-memory sizing.
+Compileall passes on both; whitespace checks pass. No live devices were used.

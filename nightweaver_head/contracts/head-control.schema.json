@@ -83,6 +83,9 @@
     "ActivityIdentity": {
       "type": "object",
       "properties": {
+        "activation_generation": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
         "cancellation_generation": {
           "$ref": "#/$defs/Counter"
         },
@@ -108,6 +111,7 @@
         "cue_command",
         "run_id",
         "play_id",
+        "activation_generation",
         "root_repeat_index",
         "cancellation_generation"
       ]
@@ -358,13 +362,14 @@
         "prepared_handles": {
           "$ref": "#/$defs/PositiveCounter"
         },
+        "program_bytes": {
+          "description": "Generated program archive bound, distinct from authored source imports.",
+          "$ref": "#/$defs/PositiveCounter"
+        },
         "receipts": {
           "$ref": "#/$defs/PositiveCounter"
         },
         "sessions": {
-          "$ref": "#/$defs/PositiveCounter"
-        },
-        "start_tombstones": {
           "$ref": "#/$defs/PositiveCounter"
         },
         "store_bytes": {
@@ -381,8 +386,8 @@
         "ordinary_jobs",
         "prepared_handles",
         "receipts",
-        "start_tombstones",
         "bundle_bytes",
+        "program_bytes",
         "store_bytes",
         "prepared_bytes"
       ]
@@ -954,6 +959,9 @@
         "identity": {
           "$ref": "#/$defs/ContentIdentity"
         },
+        "play_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
         "preparation_id": {
           "$ref": "#/$defs/NonNilUuid"
         },
@@ -966,6 +974,7 @@
         "preparation_id",
         "ready_set_revision",
         "device_id",
+        "play_id",
         "identity"
       ]
     },

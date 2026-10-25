@@ -148,10 +148,22 @@ def authority(lease, owner, rev):
     return {k: lease[k] for k in ('session', 'lease_token')} | {'owner': owner, 'operation_revision': str(rev)}
 
 
-def activity(owner):
+_play_ids = {}
+_activation_generations = {}
+
+
+def play_id(owner):
+    return _play_ids.setdefault(owner['preparation_id'], uid())
+
+
+def activity(owner, generation=None, repeat=0):
+    if generation is None:
+        generation = _activation_generations.get(owner['preparation_id'], 0) + 1
+        _activation_generations[owner['preparation_id']] = generation
     return {'owner': owner, 'cue_command': {'process_epoch': owner['coordinator_epoch'],
-            'command': {'nonce': uid(), 'window_sequence': '2'}}, 'run_id': uid(), 'play_id': uid(),
-            'root_repeat_index': '0', 'cancellation_generation': '0'}
+            'command': {'nonce': uid(), 'window_sequence': '2'}}, 'run_id': uid(), 'play_id': play_id(owner),
+            'root_repeat_index': str(repeat), 'cancellation_generation': '0',
+            'activation_generation': str(generation)}
 
 
 def content(data):
@@ -161,7 +173,7 @@ def content(data):
 
 def program_content(data, owner):
     return {**{k: owner[k] for k in ('preparation_id', 'ready_set_revision', 'device_id')},
-            'identity': content(data)['identity']}
+            'play_id': play_id(owner), 'identity': content(data)['identity']}
 
 
 def time_at(us, numerator=0, denominator=1):

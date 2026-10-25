@@ -1,19 +1,20 @@
 import copy
 import io
 import json
+import struct
 import tempfile
 import threading
 import unittest
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from nightweaver_head.program import inspect_program, compile_source
 from nightweaver_head.engine import ProgramPlayer, PygamePorts
 from nightweaver_head.service import Service
 from nightweaver_head.wire import Refusal, validate
 from head_support import (program, archive_program, wav, FakeClock, Ports, opened,
-                          authority, activity, program_content, time_at, until, bundle)
+                          authority, activity, program_content, time_at, until, bundle, uid)
 
 
 class ProgramTests(unittest.TestCase):
@@ -24,6 +25,57 @@ class ProgramTests(unittest.TestCase):
             events = [json.loads(line) for line in archive.read('events.jsonl').splitlines()]
         change(manifest, events)
         return archive_program(manifest, events)
+
+    def test_declared_peak_budget_refuses_before_expanding_events_or_audio(self):
+        data = self.mutate(lambda manifest, _: manifest.update(event_count='100000'))
+        observed = []
+        original = zipfile.ZipFile.read
+        def read(archive, name, *args, **kwargs):
+            observed.append(name)
+            return original(archive, name, *args, **kwargs)
+        with patch.object(zipfile.ZipFile, 'read', read):
+            with self.assertRaisesRegex(Refusal, 'capacity'):
+                inspect_program(data, available_bytes=32 * 1024 * 1024)
+        self.assertEqual(observed, ['manifest.json'])
+
+    def test_derived_program_budget_is_distinct_from_raw_bundle_limit(self):
+        from nightweaver_head.program_limits import program_reservation, PROGRAM_BYTES, PREPARED_BYTES
+        data = program()
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            manifest = json.loads(archive.read('manifest.json'))
+        # A generated 80MiB mono program can fit its WAV + retained native input.
+        # This proves admission arithmetic without allocating a large test payload.
+        audio_bytes = 80 * 1024 * 1024
+        retained = program_reservation(manifest, audio_bytes + 4096, audio_bytes, 1024)
+        self.assertLess(retained + audio_bytes, PREPARED_BYTES)
+        self.assertLess(audio_bytes + 4096, PROGRAM_BYTES)
+        with self.assertRaisesRegex(Refusal, 'capacity'):
+            program_reservation(manifest, audio_bytes + 4096, audio_bytes, 1024,
+                                available_bytes=150 * 1024 * 1024)
+
+    def test_peak_event_object_allowance_covers_largest_closed_event_shape(self):
+        from fractions import Fraction
+        from nightweaver_head.program_limits import object_bytes
+        event = json.loads(json.dumps({'at': time_at(899999999, 9223372036854775806,
+                                                    9223372036854775807),
+            'use_id': '1023', 'event': {'kind': 'eye', 'source_index': '99999',
+                'x': 1.0, 'y': 1.0, 'left_closed': True, 'right_closed': True, 'both_closed': True}}))
+        validate('event', event, 'head-program')
+        at = Fraction(899999999) + Fraction(9223372036854775806, 9223372036854775807)
+        self.assertLessEqual(object_bytes((at, event)), 3072)
+
+    def test_local_float_authoring_input_is_normalized_before_native_selection(self):
+        from nightweaver_head.bundle import inspect, wav_facts
+        payload = struct.pack('<ffff', -0.5, 0.5, 2.0, -2.0)
+        source = inspect(bundle(audio=wav(frames=2, rate=44100, channels=2,
+                                          encoding=3, samples=payload)))
+        compiled = compile_source(source)
+        facts, _, samples = wav_facts(compiled.audio)
+        self.assertEqual(facts['encoding'], 'pcm_s16_le')
+        self.assertEqual((facts['channels'], facts['sample_rate'], facts['frames']), (2, 44100, '2'))
+        self.assertEqual(struct.unpack('<hhhh', samples), (-16384, 16384, 32767, -32768))
+        self.assertEqual(source.facts['audio']['encoding'], 'float32_le')
+        self.assertEqual(source.audio[-len(payload):], payload)
 
     def test_closed_manifest_events_order_extents_and_source_identity(self):
         changes = [lambda m, e: m.update(extra=1), lambda m, e: m.update(duration_us='1'),
@@ -270,6 +322,59 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(Refusal, 'stale_revision'):
             self.service.prepare(request)
 
+    async def test_prepared_program_is_bound_to_its_play_before_output(self):
+        prepared, _ = await self.prepare()
+        wrong = activity(self.owner)
+        wrong['play_id'] = uid()
+        before = list(self.ports.events)
+        with self.assertRaisesRegex(Refusal, 'identity_conflict'):
+            await self.start(prepared, wrong)
+        self.assertEqual(self.ports.events, before)
+        self.assertIsNone(self.service.latest_activity)
+
+    async def test_one_run_lease_covers_repeats_and_old_repeat_stop_retires_all(self):
+        prepared, _ = await self.prepare()
+        first, _ = await self.start(prepared)
+        repeated = dict(first, root_repeat_index='1', cancellation_generation='3')
+        await self.start(prepared, repeated)
+        self.assertEqual(self.service.completed_repeat, 1)
+        before = list(self.ports.events)
+        with self.assertRaisesRegex(Refusal, 'identity_conflict'):
+            await self.start(prepared, first)
+        self.assertEqual(self.ports.events, before)
+        self.assertEqual(self.service.stop({'authority': self.auth(), 'activity': first})[1]['settlement'], 'settled')
+        with self.assertRaisesRegex(Refusal, 'wrong_activity'):
+            await self.start(prepared, dict(repeated, root_repeat_index='2'))
+
+    async def test_prestart_retirement_rolls_without_uuid_history_or_replay(self):
+        prepared, _ = await self.prepare()
+        first = None
+        # These are pure, pre-start cancellations: no native playback or wall-clock wait.
+        # Crossing the old UUID-set ceiling must not require a service restart.
+        for _ in range(4097):
+            run = activity(self.owner)
+            first = first or run
+            result = self.service.stop({'authority': self.auth(), 'activity': run})[1]
+            self.assertEqual(result['settlement'], 'settled')
+        self.assertEqual(self.service.retired_activation_high, 4097)
+        self.assertLessEqual(len(self.service.receipts), 64)
+        self.assertFalse(self.ports.events)
+        with self.assertRaisesRegex(Refusal, 'wrong_activity'):
+            await self.start(prepared, first)
+        latest, _ = await self.start(prepared)
+        self.assertEqual(latest['activation_generation'], '4098')
+        with self.assertRaisesRegex(Refusal, 'wrong_activity'):
+            self.service.stop({'authority': self.auth(), 'activity': first})
+
+    async def test_a_lease_cannot_be_rebound_to_another_actual_cue(self):
+        prepared, _ = await self.prepare()
+        run, _ = await self.start(prepared)
+        forged = dict(run, run_id=uid(), root_repeat_index='1')
+        before = list(self.ports.events)
+        with self.assertRaisesRegex(Refusal, 'identity_conflict'):
+            await self.start(prepared, forged)
+        self.assertEqual(self.ports.events, before)
+
     async def test_wrong_facts_fail_before_native_selection(self):
         facts = inspect_program(self.data).facts
         facts['duration_us'] = '7'
@@ -281,6 +386,31 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.service.prepared)
         self.assertFalse(self.ports.resources)
         await self.prepare()
+
+    async def test_unqualified_native_float_refuses_before_load(self):
+        self.assertFalse(self.service.capabilities()['float_wav'])
+        self.data = program(self.owner['role_ids'][0], audio=wav(frames=48, encoding=3), delay=250)
+        self.content = program_content(self.data, self.owner)
+        Path(self.tmp.name, self.content['identity']['sha256']).write_bytes(self.data)
+        _, result = self.service.prepare({'authority': self.auth(), 'content': self.content,
+            'expected_facts': inspect_program(self.data).facts, 'local_output_delay_us': 250})
+        await until(lambda: self.service.ordinary is None)
+        self.assertEqual(self.service.lookup(result['operation'])['failure'], 'unsupported_media')
+        self.assertFalse(self.ports.events)
+        self.assertFalse(self.service.prepared)
+
+    async def test_generated_content_upload_uses_its_separate_budget(self):
+        from head_support import content
+        length = 80 * 1024 * 1024
+        managed = content(b'')
+        managed['identity']['length'] = str(length)
+        with self.assertRaisesRegex(Refusal, 'length_exceeded'):
+            self.service.store.open({'device_boot_id': self.service.boot, 'job_id': uid(), 'content': managed})
+        derived = dict(program_content(b'', self.owner), kind='prepared_program')
+        derived['identity']['length'] = str(length)
+        result = self.service.store.open({'device_boot_id': self.service.boot, 'job_id': uid(), 'content': derived})
+        self.assertEqual(result['phase'], 'receiving')
+        self.assertFalse(self.ports.events)
 
     async def test_expiry_disposes_preparation_and_never_resurrects(self):
         await self.prepare()
@@ -327,6 +457,34 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service.stop(stop)[1]['settlement'], 'settled')
         self.assertIn(prepared['handle_id'], self.service.prepared)
         self.assertEqual(sum(e[0] == 'frame' for e in self.ports.events), 1)
+
+    async def test_old_repeat_stop_cancels_queued_repeat_and_joins_active_worker(self):
+        prepared, _ = await self.prepare()
+        gate = threading.Event()
+        self.ports.cleanup_gate = gate
+        first = activity(self.owner)
+        def request(run):
+            return {'authority': self.auth(), 'activity': run,
+                    'prepared_handle_id': prepared['handle_id'], 'at': None,
+                    'lateness_allowance_us': '100000', 'local_output_delay_us': 250}
+        await self.service.dispatch('POST', '/head-control/v1/start', request(first))
+        await until(self.ports.entered.is_set)
+        await until(lambda: self.service.ordinary is None)
+        repeated = dict(first, root_repeat_index='1', cancellation_generation='3')
+        await self.service.dispatch('POST', '/head-control/v1/start', request(repeated))
+        try:
+            self.assertIsNotNone(self.service.ordinary)
+            self.assertEqual(self.service.stop({'authority': self.auth(), 'activity': first})[1]['settlement'], 'pending')
+            self.assertFalse(self.service.quiet())
+            await until(lambda: self.service.ordinary is None)
+        finally:
+            gate.set()
+        await until(lambda: self.service.worker_future.done())
+        self.service.tick()
+        self.assertEqual(self.service.stop({'authority': self.auth(), 'activity': first})[1]['settlement'], 'settled')
+        self.assertEqual(sum(e[0] == 'frame' for e in self.ports.events), 1)
+        with self.assertRaisesRegex(Refusal, 'wrong_activity'):
+            await self.start(prepared, dict(repeated, root_repeat_index='2'))
 
     async def test_voice_prepare_loads_once_repeats_reuse_and_disarm_disposes(self):
         self.data = program(self.owner['role_ids'][0], audio=wav(frames=48), delay=250)

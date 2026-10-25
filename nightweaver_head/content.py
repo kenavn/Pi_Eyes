@@ -6,6 +6,7 @@ import tempfile
 from collections import OrderedDict
 from pathlib import Path
 from .bundle import MAX_BUNDLE
+from .program_limits import PROGRAM_BYTES
 from .wire import Refusal
 
 
@@ -69,18 +70,18 @@ class ContentStore:
         except OSError:
             raise Refusal('content_missing', 404) from None
 
-    def read(self, identity):
-        if int(identity['length']) > MAX_BUNDLE:
+    def read(self, identity, limit=MAX_BUNDLE):
+        if int(identity['length']) > limit:
             raise Refusal('unsupported_media', 422)
         with self.open_file(identity) as stream:
-            data = stream.read(MAX_BUNDLE + 1)
+            data = stream.read(limit + 1)
         if len(data) != int(identity['length']) or hashlib.sha256(data).hexdigest() != identity['sha256']:
             raise Refusal('content_mismatch', 422)
         return data
 
     def exists(self, identity):
         try:
-            if int(identity['length']) > MAX_BUNDLE:
+            if int(identity['length']) > PROGRAM_BYTES:
                 return False
             with self.open_file(identity) as stream:
                 digest = hashlib.sha256()
@@ -111,7 +112,7 @@ class ContentStore:
                 if len(path.name) != 64 or any(c not in '0123456789abcdef' for c in path.name):
                     continue
                 info = path.stat(follow_symlinks=False)
-                if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_BUNDLE:
+                if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= PROGRAM_BYTES:
                     continue
                 if len(entries) == 1024:
                     truncated = True
@@ -139,7 +140,7 @@ class ContentStore:
             raise Refusal('capacity', 429)
         identity = request['content']['identity']
         length = int(identity['length'])
-        if length > MAX_BUNDLE:
+        if length > (PROGRAM_BYTES if request['content']['kind'] == 'prepared_program' else MAX_BUNDLE):
             raise Refusal('length_exceeded', 413)
         used, count = 0, 0
         with os.scandir(self.root) as files:
