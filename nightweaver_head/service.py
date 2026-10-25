@@ -195,7 +195,7 @@ class Service:
         self.renewal_lease = self.lease(request['time_probe'], self.now())
         return copy.deepcopy(self.renewal_lease)
 
-    def close(self, request):
+    async def close(self, request):
         # Expired authority may release only its own proven-quiet resources.
         if request['session'] != self.session or request['lease_token'] != self.lease_token:
             raise Refusal('stale_owner', 409)
@@ -204,15 +204,14 @@ class Service:
         response = {'session': self.session}
         # A partially closed set must never become eligible for playback again.
         self.retired = True
-        try:
-            if self.prepared:
-                self.ports.dispose()
-            for entry in self.prepared.values():
-                entry.close()
-        except Exception:
-            raise Refusal('unknown_outcome', 503) from None
-        self.prepared.clear()
-        self.store.pins.clear()
+        self.tick()  # Retiring schedules the same tracked owner used by Disarm.
+        cleanup = self.cleanup_task
+        if cleanup is not None:
+            await asyncio.shield(cleanup)
+            if self.cleanup_task is not None:
+                raise Refusal('unknown_outcome', 503)
+        if self.session != response['session']:
+            return response  # Another concurrent Close already released this session.
         self.session = self.owner = self.open_request = self.open_lease = self.lease_token = None
         self.expired = self.retired = False
         self.high = self.renewal_high = 0
@@ -344,9 +343,8 @@ class Service:
         finally:
             if audio is not None:
                 try:
-                    cleanup = loop.run_in_executor(self.output, self.ports.dispose)
+                    cleanup = loop.run_in_executor(self.output, self.release_native, (audio,))
                     await asyncio.shield(cleanup)
-                    audio.close()
                 except Exception:
                     self.provisional_audio = audio
                     result.update(phase='unknown', settlement='unknown', failure='unknown_outcome', terminal_reason='failed')
@@ -484,13 +482,17 @@ class Service:
             result.update(phase='settled', settlement='settled', terminal_reason='stopped')
         return self.result_status(result)
 
+    def release_native(self, resources):
+        self.ports.dispose()
+        for resource in resources:
+            resource.close()
+
     async def dispose_preparation(self):
         result = self.disarm_result
         try:
             # A native cleanup call remains charged until the executor actually joins.
-            await asyncio.get_running_loop().run_in_executor(self.output, self.ports.dispose)
-            for entry in self.prepared.values():
-                entry.close()
+            await asyncio.get_running_loop().run_in_executor(
+                self.output, self.release_native, tuple(self.prepared.values()))
             self.prepared.clear()
             self.store.pins.clear()
             if result:
@@ -579,6 +581,8 @@ class Service:
                 raise Refusal('unsupported_protocol', 422)
             validate(schema, request)
         result = handler(request)
+        if asyncio.iscoroutine(result):
+            result = await result
         return result if isinstance(result, tuple) else (200, result)
 
     async def disk_call(self, function, *args):

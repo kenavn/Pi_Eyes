@@ -13,7 +13,7 @@ class BundleTests(unittest.TestCase):
         cases = [(3900088, 48000, 2, 3, 81251834), (3824069, 48000, 2, 3, 79668105),
                  (1886277, 44100, 1, 1, 42772722)]
         for frames, rate, channels, encoding, extent in cases:
-            facts, got = wav_facts(wav(frames, rate, channels, encoding, metadata=True))
+            facts, got, _ = wav_facts(wav(frames, rate, channels, encoding, metadata=True))
             self.assertEqual(got, extent)
             self.assertEqual(facts['frames'], str(frames))
         self.assertEqual(timestamp('81245.00048828125')[1], 81245000)

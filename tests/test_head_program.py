@@ -52,6 +52,49 @@ class ProgramTests(unittest.TestCase):
         with self.assertRaises(Refusal):
             inspect_program(data, local_output_delay_us=0)
 
+    def test_occurrence_identity_ignores_all_object_key_order(self):
+        def duplicate(m, e):
+            first = m['uses'][0]['occurrence']
+            first['path'] = [{'clip_id': first['use_id'], 'repeat_index': '0'}]
+            m['uses'][1]['occurrence'] = {
+                'path': [{'repeat_index': '0', 'clip_id': first['use_id']}],
+                'use_id': first['use_id']}
+            self.assertEqual(first, m['uses'][1]['occurrence'])
+        with self.assertRaises(Refusal):
+            inspect_program(self.mutate(duplicate))
+
+    def test_pcm_and_float_native_gap_and_tail_silence(self):
+        import struct
+        for encoding, width in ((1, 2), (3, 4)):
+            for channels in (1, 2):
+                silent = bytearray(48 * channels * width)
+                # Nonzero source data is authored; all source and gap boundaries
+                # are complete native frames, independent of encoding/channel count.
+                source = struct.pack('<h' if encoding == 1 else '<f', 1)
+                silent[:width] = source
+                data = program(audio=wav(frames=48, channels=channels, encoding=encoding, samples=bytes(silent)))
+                inspect_program(data)
+                for frame in (8, 16, 23, 32, 47):
+                    with self.subTest(encoding=encoding, channels=channels, frame=frame):
+                        samples = bytearray(silent)
+                        samples[frame * channels * width:frame * channels * width + width] = source
+                        with self.assertRaises(Refusal):
+                            inspect_program(program(audio=wav(frames=48, channels=channels, encoding=encoding, samples=bytes(samples))))
+                if encoding == 3:
+                    for sample in (-0.0, float('inf'), float('nan')):
+                        samples = bytearray(silent)
+                        samples[16 * channels * width:16 * channels * width + width] = struct.pack('<f', sample)
+                        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                            manifest = json.loads(archive.read('manifest.json'))
+                            events = [json.loads(line) for line in archive.read('events.jsonl').splitlines()]
+                        data = archive_program(manifest, events, wav(frames=48, channels=channels,
+                            encoding=encoding, samples=bytes(samples)))
+                        if sample == 0.0:
+                            inspect_program(data)
+                        else:
+                            with self.assertRaises(Refusal):
+                                inspect_program(data)
+
     def test_archive_paths_duplicates_and_missing_audio(self):
         for name in ('../escape', '/tmp/escape', 'animation.csv', 'manifest.json'):
             data = io.BytesIO(program())
@@ -248,7 +291,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.service.retired)
         with self.assertRaisesRegex(Refusal, 'expired_session'):
             self.service.disarm({'authority': self.auth()})
-        closed = self.service.close({k: self.lease[k] for k in ('session', 'lease_token')})
+        closed = await self.service.close({k: self.lease[k] for k in ('session', 'lease_token')})
         self.assertEqual(closed['session'], self.lease['session'])
 
     async def test_stop_during_active_use_joins_before_settlement_and_retains(self):
@@ -326,7 +369,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.service.tick()
             self.assertIn(prepared['handle_id'], self.service.prepared)
             with self.assertRaisesRegex(Refusal, 'prior_worker_unsettled'):
-                self.service.close({k: self.lease[k] for k in ('session', 'lease_token')})
+                await self.service.close({k: self.lease[k] for k in ('session', 'lease_token')})
         finally:
             gate.set()
         await until(lambda: self.service.cleanup_task is None)
@@ -358,6 +401,31 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class UnknownCleanupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_close_disposal_retains_preparation_and_session(self):
+        with tempfile.TemporaryDirectory() as root:
+            ports, clock = Ports(), FakeClock()
+            service = Service(root, ports, clock)
+            _, lease, owner = opened(service)
+            data = program(owner['role_ids'][0])
+            ref = program_content(data, owner)
+            Path(root, ref['identity']['sha256']).write_bytes(data)
+            service.prepare({'authority': authority(lease, owner, 1), 'content': ref,
+                'expected_facts': inspect_program(data).facts, 'local_output_delay_us': 0})
+            await until(lambda: service.ordinary is None)
+            def fail_disposal():
+                raise RuntimeError('synthetic uncertain decoder release')
+            ports.dispose = fail_disposal
+            with self.assertRaisesRegex(Refusal, 'unknown_outcome'):
+                await service.close({k: lease[k] for k in ('session', 'lease_token')})
+            self.assertTrue(service.prepared)
+            self.assertEqual(service.session, lease['session'])
+            self.assertTrue(service.retired)
+            self.assertFalse(service.quiet())
+            self.assertFalse(await service.shutdown())
+            service.output.shutdown(wait=True)
+            service.inspector.shutdown(wait=True)
+            service.disk.shutdown(wait=True)
+
     async def test_failed_restoration_keeps_worker_claim_after_actual_return(self):
         with tempfile.TemporaryDirectory() as root:
             ports, clock = Ports(), FakeClock()

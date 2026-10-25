@@ -84,7 +84,7 @@ def wav_facts(data):
     if extent > MAX_EXTENT:
         unsupported()
     return {'encoding': 'pcm_s16_le' if encoding == 1 else 'float32_le',
-            'frames': str(frames), 'sample_rate': rate, 'channels': channels}, extent
+            'frames': str(frames), 'sample_rate': rate, 'channels': channels}, extent, samples
 
 
 def timestamp(text):
@@ -150,7 +150,7 @@ def inspect(data):
                         or label in ('.', '..') or manifest['audio_format'] != 'wav' or 'audio.dat' not in names):
                     unsupported()
                 audio = archive.read('audio.dat')
-                audio_facts, audio_extent = wav_facts(audio)
+                audio_facts, audio_extent, _ = wav_facts(audio)
             text = archive.read('animation.csv').decode('utf-8')
             if any(len(line.encode('utf-8')) > 4096 for line in text.splitlines()):
                 unsupported()

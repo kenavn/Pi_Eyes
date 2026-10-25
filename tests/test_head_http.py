@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from nightweaver_head.http import HTTPServer
 from nightweaver_head.service import Service
-from head_support import FakeClock, Ports, bundle, content, uid, opened, authority, activity, until, program, program_content
+from head_support import FakeClock, Ports, bundle, content, uid, opened, authority, activity, until, program, program_content, wav
 from nightweaver_head.bundle import inspect
 from nightweaver_head.program import inspect_program
 
@@ -97,6 +97,49 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.request('/head-control/v1/sessions/renew', renewal))[0], 200)
         stop = {'authority': authority(lease, owner, 2), 'activity': activity(owner)}
         self.assertEqual((await self.request('/head-control/v1/stop', stop))[1]['settlement'], 'settled')
+
+    async def test_close_native_disposal_does_not_block_control_authority(self):
+        import threading
+        from pathlib import Path
+        opened_request, lease, owner = opened(self.service)
+        data = program(owner['role_ids'][0], audio=wav(frames=48))
+        ref = program_content(data, owner)
+        Path(self.tmp.name, ref['identity']['sha256']).write_bytes(data)
+        self.service.prepare({'authority': authority(lease, owner, 1), 'content': ref,
+            'expected_facts': inspect_program(data).facts, 'local_output_delay_us': 0})
+        await until(lambda: self.service.ordinary is None)
+        entered, release = threading.Event(), threading.Event()
+        original = self.service.ports.dispose
+        def held_disposal():
+            entered.set()
+            release.wait()
+            original()
+        self.service.ports.dispose = held_disposal
+        closing = asyncio.create_task(self.request('/head-control/v1/sessions/close',
+            {k: lease[k] for k in ('session', 'lease_token')}))
+        try:
+            await until(entered.is_set)
+            self.assertFalse(closing.done())
+            status, observation = await self.request('/head-control/v1/status',
+                {'device_boot_id': self.service.boot, 'challenge': uid()})
+            self.assertEqual(status, 200)
+            self.assertEqual(observation['session'], lease['session'])
+            renewal = {'session': lease['session'], 'lease_token': lease['lease_token'],
+                'renewal_sequence': '1', 'time_probe': opened_request['time_probe'], 'clock_mapping': None}
+            self.assertEqual((await self.request('/head-control/v1/sessions/renew', renewal))[0], 200)
+            status, stopped = await self.request('/head-control/v1/stop',
+                {'authority': authority(lease, owner, 2), 'activity': activity(owner)})
+            self.assertEqual(status, 202)
+            self.assertEqual(stopped['settlement'], 'pending')
+            self.assertTrue(self.service.prepared)
+            self.assertFalse(self.service.ports.resources[0].closed)
+        finally:
+            release.set()
+        status, closed = await closing
+        self.assertEqual(status, 200)
+        self.assertEqual(closed['session'], lease['session'])
+        self.assertTrue(self.service.ports.resources[0].closed)
+        self.assertIsNone(self.service.session)
 
     async def test_partial_upload_disconnect_never_published(self):
         data = bundle()

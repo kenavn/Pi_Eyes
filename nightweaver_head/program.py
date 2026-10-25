@@ -1,6 +1,7 @@
 """Closed, bounded immutable whole-program archive; never extracts archive paths."""
 import io
 import stat
+import struct
 import zipfile
 from dataclasses import dataclass
 from fractions import Fraction
@@ -48,7 +49,9 @@ def inspect_program(data, local_output_delay_us=None):
             previous, identities = Fraction(0), set()
             for index, use in enumerate(uses):
                 start, end = coordinate(use['start']), coordinate(use['end'])
-                identity = (use['role_id'], str(use['occurrence']))
+                occurrence = use['occurrence']
+                identity = (use['role_id'], occurrence['use_id'],
+                            tuple((step['clip_id'], step['repeat_index']) for step in occurrence['path']))
                 if (int(use['id']) != index or start < previous or end <= start or end > duration
                         or identity in identities or len(use['occurrence']['path']) > 32
                         or int(use['source_movement_extent_us']) > end - start):
@@ -60,7 +63,7 @@ def inspect_program(data, local_output_delay_us=None):
                 if audio or any(int(u['source_audio_frames']) or int(u['audio_start_frame']) for u in uses):
                     unsupported()
             else:
-                facts, extent = wav_facts(audio)
+                facts, extent, samples = wav_facts(audio)
                 if facts != manifest['audio']:
                     unsupported()
                 expected_frames = (duration * facts['sample_rate'] + 999999) // 1000000
@@ -74,6 +77,26 @@ def inspect_program(data, local_output_delay_us=None):
                     expected_frames = max(expected_frames, int(use['audio_start_frame']) + int(use['source_audio_frames']))
                 if int(facts['frames']) != expected_frames:
                     unsupported()
+                # The retained decoder continuously plays the full WAV. Every sample
+                # outside complete declared source spans must therefore be silence.
+                width = facts['channels'] * (2 if facts['encoding'] == 'pcm_s16_le' else 4)
+                cursor = 0
+                def silence(first, last):
+                    gap = samples[first * width:last * width]
+                    if facts['encoding'] == 'pcm_s16_le':
+                        if any(gap):
+                            unsupported()
+                    elif any(sample != 0.0 for (sample,) in struct.iter_unpack('<f', gap)):
+                        unsupported()
+                for use in uses:
+                    start, count = int(use['audio_start_frame']), int(use['source_audio_frames'])
+                    if not count:
+                        continue
+                    if start < cursor:
+                        unsupported()
+                    silence(cursor, start)
+                    cursor = start + count
+                silence(cursor, int(facts['frames']))
             raw = archive.read('events.jsonl')
             lines = raw.splitlines()
             if not lines or len(lines) != int(manifest['event_count']) or len(lines) > 100000:

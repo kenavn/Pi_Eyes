@@ -179,7 +179,7 @@ One common format is explicit in the immutable program; the endpoint does not co
 heterogeneous source formats or invent managed versions for prepared bytes.
 
 Author validation uses the private existing Python3.9.25 and3.14.6 peer environments
-with h11 installed:44 head tests pass on each. Coverage includes closed archive/wire
+with h11 installed:48 head tests pass on each. Coverage includes closed archive/wire
 validation, complete source identities and captured delay, exact fractional boundaries,
 gaps and final modes, source import, retained native selection without setup output,
 Stop/repeat/Disarm, stale activity rejection, held native preparation/restoration/
@@ -189,3 +189,18 @@ schemas match frozen Nightweaver `a8991e1` byte-for-byte. These are author check
 independent review, cross-language integrated acceptance and installed native/physical
 qualification remain separate coordinator gates. No device output or deployment was
 performed for these tests.
+
+
+NIGHT-451 bounded review pass1/3 identified three blockers, corrected for pass2:
+Close now awaits the same tracked off-loop disposal owner as Disarm, with session,
+pins and native ownership retained until actual join; failed disposal stays unknown.
+Occurrence uniqueness compares role/use/path tuples independently of JSON object order.
+The WAV validator exposes its checked sample payload to the program parser, which
+verifies every native frame outside declared complete source spans is silence (PCM16
+zero bytes or finite float32 zero, including negative zero). Nonzero authored source
+samples remain valid. Regression tests hold Close disposal while real loopback HTTP
+status, renewal and reserved Stop respond; reordered nested identities and nonzero
+mono/stereo PCM/float gaps/tails are refused. The actual N449 Rust encoder's synthetic
+250µs/two-use/six-event PCM16 archive passes this stricter Python consumer on both
+supported test runtimes. These corrections do not reset the three-pass review ledger
+or establish native target qualification.
