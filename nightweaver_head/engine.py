@@ -1,4 +1,5 @@
 """One synchronous output owner. Cancellation fences every authored send and loop."""
+import io
 import logging
 import os
 import socket
@@ -8,6 +9,7 @@ import sys
 import tempfile
 import threading
 import time
+import wave
 from .wire import Refusal
 
 
@@ -139,6 +141,7 @@ class PygamePorts:
     def __init__(self, sink_name, eye_port=5005, mouth_port=5006):
         self.sink_name, self.eye_port, self.mouth_port = sink_name, eye_port, mouth_port
         self.pg = self.sock = self.path = None
+        self.idle_audio = None
         self.ready = False
 
     def initialize(self):
@@ -185,8 +188,11 @@ class PygamePorts:
             raise
 
     def load(self, audio):
-        self.path = audio.path
         self.pg.mixer.music.load(audio.path)
+        if self.idle_audio is not None:
+            self.idle_audio.close()
+            self.idle_audio = None
+        self.path = audio.path
 
     def play(self):
         self.pg.mixer.music.play()
@@ -220,14 +226,35 @@ class PygamePorts:
 
     def dispose(self):
         if self.pg is not None and self.path is not None:
-            self.pg.mixer.music.unload()
+            self.stop()
+            # pygame 1.9.6 frees the old decoder only on successful replacement.
+            # Keep this unplayed file object alive while SDL owns its RWops.
+            idle = io.BytesIO()
+            with wave.open(idle, 'wb') as stream:
+                stream.setnchannels(2)
+                stream.setsampwidth(2)
+                stream.setframerate(48000)
+                stream.writeframes(b'\0' * 4)
+            idle.seek(0)
+            try:
+                self.pg.mixer.music.load(idle)
+            except Exception:
+                idle.close()
+                raise
+            if self.idle_audio is not None:
+                self.idle_audio.close()
+            self.idle_audio = idle
         self.path = None
 
     def close(self):
         self.stop()
-        self.dispose()
-        if self.sock:
-            self.sock.close()
         if self.pg:
             self.pg.mixer.quit()
+        # Mixer shutdown must release RWops before its Python buffer is closed.
+        self.path = None
+        if self.idle_audio is not None:
+            self.idle_audio.close()
+            self.idle_audio = None
+        if self.sock:
+            self.sock.close()
         self.ready = False
