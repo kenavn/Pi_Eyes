@@ -8,8 +8,10 @@ remain untouched. The editor and `.skelanim` authoring format remain unchanged.
 ## Contract and runtime
 
 The exact generated schemas in `nightweaver_head/contracts/` are copied byte-for-byte
-from Nightweaver commit `2c20956a1f9790d904a3ec5ea68fa12e90574650`,
-`contracts/head-control.schema.json` and `contracts/device-content.schema.json`.
+from Nightweaver commit `a8991e1`,
+`contracts/head-control.schema.json`, `contracts/device-content.schema.json` and
+`contracts/head-program.schema.json`. This is the N449 frozen contract checkpoint;
+dependent service/native implementation is still in progress and is not qualified.
 The normative route/authority/timing contract is that commit's
 `docs/contracts/head-control.md`. Schema regeneration belongs to Nightweaver;
 update the provenance and conformance fixtures together after an approved contract change.
