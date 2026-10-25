@@ -163,21 +163,69 @@ class PygamePorts:
         try:
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(audio)
-            code = ('import pygame,sys;pygame.mixer.init(frequency=48000,size=-16,channels=2);'
-                    'pygame.mixer.music.load(sys.argv[1]);pygame.mixer.quit()')
-            started = time.monotonic()
+            read_fd = write_fd = -1
             try:
-                subprocess.run([sys.executable, '-c', code, path], timeout=AUDIO_VERIFY_TIMEOUT_SECONDS,
-                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except (subprocess.SubprocessError, OSError) as error:
-                category = ('timeout' if isinstance(error, subprocess.TimeoutExpired) else
-                            'nonzero' if isinstance(error, subprocess.CalledProcessError) else 'spawn')
-                status = (max(-255, min(255, error.returncode))
-                          if isinstance(error, subprocess.CalledProcessError) else None)
-                elapsed = min(86400.0, max(0.0, time.monotonic() - started))
-                _LOG.warning('audio_verify_failed category=%s elapsed_seconds=%.3f exit_status=%s',
-                             category, elapsed, status)
-                raise Refusal('audio_unavailable', 503) from None
+                try:
+                    read_fd, write_fd = os.pipe()
+                    os.set_blocking(read_fd, False)
+                except OSError:
+                    for diagnostic_fd in (read_fd, write_fd):
+                        if diagnostic_fd >= 0:
+                            os.close(diagnostic_fd)
+                    read_fd = write_fd = -1
+                code = """import os, sys
+fd = int(sys.argv[2])
+def mark(stage):
+    try:
+        os.write(fd, (stage + '\\n').encode('ascii'))
+    except OSError:
+        pass
+mark('bootstrap')
+mark('import_begin')
+import pygame
+mark('import_done')
+mark('init_begin')
+pygame.mixer.init(frequency=48000, size=-16, channels=2)
+mark('init_done')
+mark('load_begin')
+pygame.mixer.music.load(sys.argv[1])
+mark('load_done')
+mark('quit_begin')
+pygame.mixer.quit()
+mark('quit_done')
+"""
+                started = time.monotonic()
+                try:
+                    subprocess.run([sys.executable, '-c', code, path, str(write_fd)],
+                                   timeout=AUDIO_VERIFY_TIMEOUT_SECONDS, check=True,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   pass_fds=(write_fd,) if write_fd >= 0 else ())
+                except (subprocess.SubprocessError, OSError) as error:
+                    # run has joined the child, including after timeout: never wait for EOF.
+                    last_stage = 'unknown'
+                    if read_fd >= 0:
+                        try:
+                            records = os.read(read_fd, 1024).split(b'\n')[:-1]
+                        except OSError:
+                            records = ()
+                        stages = {b'bootstrap', b'import_begin', b'import_done', b'init_begin',
+                                  b'init_done', b'load_begin', b'load_done', b'quit_begin',
+                                  b'quit_done'}
+                        for record in records:
+                            if record in stages:
+                                last_stage = record.decode('ascii')
+                    category = ('timeout' if isinstance(error, subprocess.TimeoutExpired) else
+                                'nonzero' if isinstance(error, subprocess.CalledProcessError) else 'spawn')
+                    status = (max(-255, min(255, error.returncode))
+                              if isinstance(error, subprocess.CalledProcessError) else None)
+                    elapsed = min(86400.0, max(0.0, time.monotonic() - started))
+                    _LOG.warning('audio_verify_failed category=%s elapsed_seconds=%.3f exit_status=%s '
+                                 'last_stage=%s', category, elapsed, status, last_stage)
+                    raise Refusal('audio_unavailable', 503) from None
+            finally:
+                for diagnostic_fd in (read_fd, write_fd):
+                    if diagnostic_fd >= 0:
+                        os.close(diagnostic_fd)
             return resource
         except BaseException as error:
             try:
