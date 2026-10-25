@@ -54,6 +54,18 @@ class FakeClock:
             self.hook()
 
 
+class Audio:
+    def __init__(self, payload):
+        self.payload = payload
+        self.closed = False
+        self.close_count = 0
+
+    def close(self):
+        if not self.closed:
+            self.close_count += 1
+            self.closed = True
+
+
 class Ports:
     ready = True
     sink_name = 'synthetic'
@@ -64,14 +76,28 @@ class Ports:
         self.cleanup_gate = None
         self.entered = threading.Event()
         self.failed_verify = False
+        self.resources = []
+        self.prepare_gate = self.load_gate = None
+        self.prepare_entered = threading.Event()
+        self.load_entered = threading.Event()
 
-    def verify(self, audio):
+    def prepare_audio(self, audio):
+        self.prepare_entered.set()
+        if self.prepare_gate:
+            self.prepare_gate.wait()
         if self.failed_verify:
             raise RuntimeError('synthetic unavailable')
-        self.events.append(('verify', len(audio)))
+        self.events.append(('prepare_audio', len(audio)))
+        resource = Audio(audio)
+        self.resources.append(resource)
+        return resource
 
     def load(self, audio):
-        self.events.append(('load', len(audio)))
+        assert not audio.closed
+        self.events.append(('load', audio))
+        self.load_entered.set()
+        if self.load_gate:
+            self.load_gate.wait()
 
     def play(self):
         self.events.append(('play',))

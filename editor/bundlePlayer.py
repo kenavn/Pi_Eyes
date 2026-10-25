@@ -31,18 +31,21 @@ def main():
     ownership = OutputLock()
     ports = PygamePorts(args.sink_name, args.eye_port, args.mouth_port)
     cancel = threading.Event()
+    audio = None
     try:
         ports.initialize()
         if bundle.audio:
-            ports.verify(bundle.audio)
+            audio = ports.prepare_audio(bundle.audio)
         import signal
         signal.signal(signal.SIGINT, lambda *_: cancel.set())
         signal.signal(signal.SIGTERM, lambda *_: cancel.set())
-        failure = BundlePlayer(ports).run(bundle, cancel, args.start_delay * 1000, not args.no_resume_auto, args.loop)
+        failure = BundlePlayer(ports).run(bundle, audio, cancel, args.start_delay * 1000, not args.no_resume_auto, args.loop)
         if failure:
             raise SystemExit(failure)
     finally:
         ports.close()
+        if audio is not None:
+            audio.close()
         ownership.close()
 
 

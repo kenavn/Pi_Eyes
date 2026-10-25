@@ -1,4 +1,5 @@
 """One synchronous output owner. Cancellation fences every authored send and loop."""
+import io
 import logging
 import os
 import socket
@@ -8,6 +9,7 @@ import sys
 import tempfile
 import threading
 import time
+import wave
 from .wire import Refusal
 
 
@@ -23,6 +25,17 @@ class Clock:
         cancelled.wait(max(0, us) / 1000000)
 
 
+class PreparedAudio:
+    """Session-owned decoder input; output workers only borrow its retained file."""
+    def __init__(self, path):
+        self.path = path
+
+    def close(self):
+        if self.path is not None:
+            os.unlink(self.path)
+            self.path = None
+
+
 class BundlePlayer:
     """Reusable engine; preparing immutable bundles never selects the music slot."""
     def __init__(self, ports, clock=None):
@@ -30,12 +43,24 @@ class BundlePlayer:
         self.clock = clock or Clock()
         self.audio_position_us = None
 
-    def run(self, bundle, cancelled, delay_us=0, resume_auto=True, loop=False, started=None, fence=None):
+    def run(self, bundle, audio, cancelled, delay_us=0, resume_auto=True, loop=False, started=None, fence=None, target=None):
         failure = None
         try:
             while not cancelled.is_set():
+                if fence:
+                    fence()
                 if bundle.audio:
-                    self.ports.load(bundle.audio)
+                    self.ports.load(audio)
+                if cancelled.is_set():
+                    break
+                if fence:
+                    fence()
+                if target is not None:
+                    while not cancelled.is_set() and self.clock.now() < target:
+                        self.clock.wait(cancelled, min(1000, target - self.clock.now()))
+                        if fence:
+                            fence()
+                    target = None
                 if cancelled.is_set():
                     break
                 if fence:
@@ -116,6 +141,7 @@ class PygamePorts:
     def __init__(self, sink_name, eye_port=5005, mouth_port=5006):
         self.sink_name, self.eye_port, self.mouth_port = sink_name, eye_port, mouth_port
         self.pg = self.sock = self.path = None
+        self.idle_audio = None
         self.ready = False
 
     def initialize(self):
@@ -128,18 +154,20 @@ class PygamePorts:
         self.sock.settimeout(0.25)
         self.ready = True
 
-    def verify(self, audio):
-        """Separate bounded process cannot replace active pygame.music selection."""
+    def prepare_audio(self, audio):
+        """Write and verify once without touching the active music selection."""
         if not self.ready:
             raise Refusal('audio_unavailable', 503)
-        with tempfile.NamedTemporaryFile(suffix='.wav') as stream:
-            stream.write(audio)
-            stream.flush()
+        fd, path = tempfile.mkstemp(suffix='.wav')
+        resource = PreparedAudio(path)
+        try:
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(audio)
             code = ('import pygame,sys;pygame.mixer.init(frequency=48000,size=-16,channels=2);'
                     'pygame.mixer.music.load(sys.argv[1]);pygame.mixer.quit()')
             started = time.monotonic()
             try:
-                subprocess.run([sys.executable, '-c', code, stream.name], timeout=AUDIO_VERIFY_TIMEOUT_SECONDS,
+                subprocess.run([sys.executable, '-c', code, path], timeout=AUDIO_VERIFY_TIMEOUT_SECONDS,
                                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except (subprocess.SubprocessError, OSError) as error:
                 category = ('timeout' if isinstance(error, subprocess.TimeoutExpired) else
@@ -147,16 +175,24 @@ class PygamePorts:
                 status = (max(-255, min(255, error.returncode))
                           if isinstance(error, subprocess.CalledProcessError) else None)
                 elapsed = min(86400.0, max(0.0, time.monotonic() - started))
-                # Local diagnostics deliberately exclude exception text, child output and paths.
                 _LOG.warning('audio_verify_failed category=%s elapsed_seconds=%.3f exit_status=%s',
                              category, elapsed, status)
                 raise Refusal('audio_unavailable', 503) from None
+            return resource
+        except BaseException as error:
+            try:
+                resource.close()
+            except Exception:
+                # Preserve ownership when unlink cannot be proven; never advertise quiet.
+                error.prepared_audio = resource
+            raise
 
     def load(self, audio):
-        fd, self.path = tempfile.mkstemp(suffix='.wav')
-        with os.fdopen(fd, 'wb') as stream:
-            stream.write(audio)
-        self.pg.mixer.music.load(self.path)
+        self.pg.mixer.music.load(audio.path)
+        if self.idle_audio is not None:
+            self.idle_audio.close()
+            self.idle_audio = None
+        self.path = audio.path
 
     def play(self):
         self.pg.mixer.music.play()
@@ -189,15 +225,36 @@ class PygamePorts:
             self.send(b'\x42' if right or both else b'\x43', self.eye_port)
 
     def dispose(self):
-        if self.path:
-            os.unlink(self.path)
-            self.path = None
+        if self.pg is not None and self.path is not None:
+            self.stop()
+            # pygame 1.9.6 frees the old decoder only on successful replacement.
+            # Keep this unplayed file object alive while SDL owns its RWops.
+            idle = io.BytesIO()
+            with wave.open(idle, 'wb') as stream:
+                stream.setnchannels(2)
+                stream.setsampwidth(2)
+                stream.setframerate(48000)
+                stream.writeframes(b'\0' * 4)
+            idle.seek(0)
+            try:
+                self.pg.mixer.music.load(idle)
+            except Exception:
+                idle.close()
+                raise
+            if self.idle_audio is not None:
+                self.idle_audio.close()
+            self.idle_audio = idle
+        self.path = None
 
     def close(self):
         self.stop()
-        self.dispose()
-        if self.sock:
-            self.sock.close()
         if self.pg:
             self.pg.mixer.quit()
+        # Mixer shutdown must release RWops before its Python buffer is closed.
+        self.path = None
+        if self.idle_audio is not None:
+            self.idle_audio.close()
+            self.idle_audio = None
+        if self.sock:
+            self.sock.close()
         self.ready = False

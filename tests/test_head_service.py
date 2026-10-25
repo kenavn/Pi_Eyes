@@ -236,3 +236,197 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         observed = self.s.lookup(result['operation'])
         self.assertEqual(observed['settlement'], 'settled')
         self.assertEqual(observed['failure'], 'worker_failure')
+
+    async def test_prepared_file_lives_across_natural_a_b_and_deduplicates(self):
+        request, prepared = await self.prepare(data=bundle(audio=wav()))
+        resource = self.ports.resources[0]
+        self.assertEqual([e[0] for e in self.ports.events], ['prepare_audio'])
+        duplicate = copy.deepcopy(request)
+        duplicate['authority']['operation_revision'] = '2'
+        self.s.prepare(duplicate)
+        await until(lambda: self.s.ordinary is None)
+        self.assertEqual(len(self.ports.resources), 1)
+        self.assertEqual(len(self.s.prepared), 1)
+        entry = self.s.prepared[prepared['handle_id']]
+        self.assertEqual(entry.reservation, entry.bundle.reservation + len(entry.bundle.audio))
+        for revision in (3, 4):
+            self.ports.positions = [10000]
+            self.s.start(self.start_request(prepared, revision))
+            await until(lambda: self.s.worker_future is not None and self.s.worker_future.done())
+            self.s.tick()
+            self.assertFalse(resource.closed)
+        self.assertEqual([e[1] for e in self.ports.events if e[0] == 'load'], [resource, resource])
+        self.s.close({k: self.lease[k] for k in ('session', 'lease_token')})
+        self.assertTrue(resource.closed)
+        self.assertEqual(resource.close_count, 1)
+
+    async def test_cancel_prepare_keeps_claim_until_native_job_and_cleanup_return(self):
+        self.ports.prepare_gate = threading.Event()
+        data = bundle(audio=wav())
+        managed = content(data)
+        Path(self.tmp.name, managed['identity']['sha256']).write_bytes(data)
+        request = {'authority': self.auth(1), 'content': managed, 'expected_facts': inspect(data).facts,
+                   'resume_auto': True, 'local_output_delay_us': 0}
+        _, result = self.s.prepare(request)
+        await until(self.ports.prepare_entered.is_set)
+        task = self.s.control_task
+        task.cancel()
+        await asyncio.sleep(0)
+        self.assertFalse(task.done())
+        with self.assertRaisesRegex(Refusal, 'prior_worker_unsettled'):
+            self.s.close({k: self.lease[k] for k in ('session', 'lease_token')})
+        self.assertFalse(self.ports.resources)
+        self.ports.prepare_gate.set()
+        await task
+        self.assertTrue(self.ports.resources[0].closed)
+        self.assertFalse(self.s.prepared)
+        self.assertTrue(self.s.quiet())
+        self.assertEqual(self.s.lookup(result['operation'])['failure'], 'cancelled')
+
+    async def test_failed_prepare_releases_claim_and_resource(self):
+        self.ports.failed_verify = True
+        data = bundle(audio=wav())
+        managed = content(data)
+        Path(self.tmp.name, managed['identity']['sha256']).write_bytes(data)
+        request = {'authority': self.auth(1), 'content': managed, 'expected_facts': inspect(data).facts,
+                   'resume_auto': True, 'local_output_delay_us': 0}
+        _, result = self.s.prepare(request)
+        await until(lambda: self.s.ordinary is None)
+        self.assertFalse(self.s.prepared)
+        self.assertFalse(self.ports.resources)
+        self.assertEqual(self.s.lookup(result['operation'])['failure'], 'worker_failure')
+
+    async def test_stop_and_expiry_during_load_cannot_emit_authored_output(self):
+        for expire in (False, True):
+            if expire:
+                self.s.close({k: self.lease[k] for k in ('session', 'lease_token')})
+                self.open, self.lease, self.owner = opened(self.s)
+            _, prepared = await self.prepare(data=bundle(audio=wav()))
+            self.ports.events.clear()
+            self.ports.load_entered.clear()
+            self.ports.load_gate = threading.Event()
+            request = self.start_request(prepared)
+            self.s.start(request)
+            await until(self.ports.load_entered.is_set)
+            self.assertFalse(any(e[0] in ('play', 'frame') for e in self.ports.events))
+            if expire:
+                self.clock.value = self.s.lease_until
+                self.s.tick()
+            else:
+                self.s.stop({'authority': self.auth(3), 'activity': request['activity']})
+            self.ports.load_gate.set()
+            await until(lambda: self.s.worker_future.done())
+            self.s.tick()
+            self.assertFalse(any(e[0] in ('play', 'frame') or e == ('auto', False) for e in self.ports.events))
+
+    async def test_far_mapped_start_preloads_and_does_not_hit_startup_watchdog(self):
+        _, prepared = await self.prepare(data=bundle(audio=wav()))
+        self.s.mapping = {'state': 'ready', 'ref_local_us': str(self.clock.now()), 'ref_host_us': '0',
+                          'rate_ppb': 0, 'mapping_seq': '1', 'epoch': self.open['coordinator_epoch'], 'uncertainty_us': 0}
+        request = self.start_request(prepared)
+        request['at'] = {'epoch': self.open['coordinator_epoch'], 'host_us': '6000000'}
+        self.s.lease_until = self.clock.now() + 20000000
+        self.ports.load_gate = threading.Event()
+        _, result = self.s.start(request)
+        await until(self.ports.load_entered.is_set)
+        self.assertEqual(self.s.worker_deadline, 12000000)
+        self.clock.value += 5500000
+        self.s.tick()
+        self.assertFalse(self.s.worker_timed_out)
+        self.assertEqual(self.s.lookup(result['operation'])['phase'], 'starting')
+        self.s.stop({'authority': self.auth(3), 'activity': request['activity']})
+        self.assertEqual(self.s.worker_deadline, 11500000)
+        self.ports.load_gate.set()
+        await until(lambda: self.s.worker_future.done())
+        self.s.tick()
+        self.assertFalse(any(e[0] in ('play', 'frame') for e in self.ports.events))
+
+    async def test_unknown_provisional_cleanup_retains_claim(self):
+        self.ports.prepare_gate = threading.Event()
+        original = self.ports.prepare_audio
+        def prepare_audio(data):
+            audio = original(data)
+            def fail_close():
+                raise OSError('held resource')
+            audio.close = fail_close
+            return audio
+        self.ports.prepare_audio = prepare_audio
+        data = bundle(audio=wav())
+        managed = content(data)
+        Path(self.tmp.name, managed['identity']['sha256']).write_bytes(data)
+        request = {'authority': self.auth(1), 'content': managed, 'expected_facts': inspect(data).facts,
+                   'resume_auto': True, 'local_output_delay_us': 0}
+        _, result = self.s.prepare(request)
+        await until(self.ports.prepare_entered.is_set)
+        task = self.s.control_task
+        task.cancel()
+        self.ports.prepare_gate.set()
+        await task
+        self.assertEqual(self.s.lookup(result['operation'])['settlement'], 'unknown')
+        self.assertIs(self.s.provisional_audio, self.ports.resources[0])
+        self.assertFalse(self.s.quiet())
+        with self.assertRaisesRegex(Refusal, 'prior_worker_unsettled'):
+            self.s.close({k: self.lease[k] for k in ('session', 'lease_token')})
+        self.assertFalse(await self.s.shutdown())
+
+    async def test_unknown_worker_disposal_retains_prepared_resource(self):
+        _, prepared = await self.prepare(data=bundle(audio=wav()))
+        resource = self.ports.resources[0]
+        self.ports.positions = [10000]
+        def fail_dispose():
+            raise OSError('held selection')
+        self.ports.dispose = fail_dispose
+        _, result = self.s.start(self.start_request(prepared))
+        await until(lambda: self.s.worker_future is not None and self.s.worker_future.done())
+        self.s.tick()
+        self.assertEqual(self.s.lookup(result['operation'])['settlement'], 'unknown')
+        self.assertFalse(self.s.quiet())
+        self.assertFalse(resource.closed)
+        self.assertFalse(await self.s.shutdown())
+        self.assertFalse(resource.closed)
+
+    async def test_session_close_failure_keeps_pins_session_and_entry(self):
+        _, prepared = await self.prepare(data=bundle(audio=wav()))
+        resource = self.ports.resources[0]
+        original = resource.close
+        def fail_close():
+            raise OSError('held prepared file')
+        resource.close = fail_close
+        with self.assertRaisesRegex(Refusal, 'unknown_outcome'):
+            self.s.close({k: self.lease[k] for k in ('session', 'lease_token')})
+        self.assertIsNotNone(self.s.session)
+        self.assertIn(prepared['handle_id'], self.s.prepared)
+        self.assertTrue(self.s.store.pins)
+        self.assertTrue(self.s.retired)
+        self.assertFalse(resource.closed)
+        resource.close = original
+
+    async def test_retirement_during_prepare_closes_unpublished_resource(self):
+        self.ports.prepare_gate = threading.Event()
+        data = bundle(audio=wav())
+        managed = content(data)
+        Path(self.tmp.name, managed['identity']['sha256']).write_bytes(data)
+        request = {'authority': self.auth(1), 'content': managed, 'expected_facts': inspect(data).facts,
+                   'resume_auto': True, 'local_output_delay_us': 0}
+        _, result = self.s.prepare(request)
+        await until(self.ports.prepare_entered.is_set)
+        self.s.stop({'authority': self.auth(2), 'activity': activity(self.owner)})
+        self.ports.prepare_gate.set()
+        await until(lambda: self.s.ordinary is None)
+        self.assertEqual(self.s.lookup(result['operation'])['failure'], 'owner_retired')
+        self.assertTrue(self.ports.resources[0].closed)
+        self.assertFalse(self.s.prepared)
+
+    async def test_retained_audio_file_is_charged_before_allocation(self):
+        from dataclasses import replace
+        data = bundle(audio=wav())
+        parsed = inspect(data)
+        self.s.inspect_bundle = lambda _: replace(parsed, reservation=268435456)
+        managed = content(data)
+        request = {'authority': self.auth(1), 'content': managed, 'expected_facts': parsed.facts,
+                   'resume_auto': True, 'local_output_delay_us': 0}
+        _, result = self.s.prepare(request)
+        await until(lambda: self.s.ordinary is None)
+        self.assertEqual(self.s.lookup(result['operation'])['failure'], 'capacity')
+        self.assertFalse(self.ports.resources)
+        self.assertFalse(self.ports.prepare_entered.is_set())
