@@ -100,4 +100,11 @@ def check(node, value, root):
         if value < node.get('minimum', value) or value > node.get('maximum', value):
             raise Refusal('malformed')
 
+    if kind == 'object' and 'role_ids' in node.get('properties', {}):
+        roles = value['role_ids']
+        if not roles or len(roles) > 1024 or any(a >= b for a, b in zip(roles, roles[1:])):
+            raise Refusal('malformed')
+    if kind == 'object' and {'owner', 'role_id', 'occurrence'} <= node.get('properties', {}).keys():
+        if value['role_id'] not in value['owner']['role_ids']:
+            raise Refusal('wrong_activity', 409)
     return value

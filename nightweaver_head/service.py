@@ -296,7 +296,7 @@ class Service:
             return self.result_status(old)
         if self.retired:
             raise Refusal('owner_retired', 409)
-        if activity['owner'] != authority['owner']:
+        if activity['owner'] != authority['owner'] or activity['role_id'] not in activity['owner']['role_ids']:
             raise Refusal('identity_conflict', 409)
         item = self.prepared.get(request['prepared_handle_id'])
         if item is None or item[0]['owner'] != authority['owner'] or item[0]['session'] != self.session:
@@ -376,7 +376,7 @@ class Service:
         if old:
             self.update_stop(old)
             return self.result_status(old)
-        if activity['owner'] != authority['owner']:
+        if activity['owner'] != authority['owner'] or activity['role_id'] not in activity['owner']['role_ids']:
             raise Refusal('identity_conflict', 409)
         if self.latest_activity is not None and activity != self.latest_activity:
             raise Refusal('wrong_activity', 409)

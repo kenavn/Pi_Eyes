@@ -104,7 +104,7 @@ class Ports:
 def owner(epoch):
     return {'command': {'process_epoch': epoch, 'command': {'nonce': uid(), 'window_sequence': '1'}},
             'coordinator_epoch': epoch, 'loaded': {'project': {'project_id': uid(), 'revision': '1'}, 'context_generation': '1'},
-            'stage_id': uid(), 'play_id': uid(), 'run_id': uid(), 'device_id': uid(), 'role_id': uid(),
+            'stage_id': uid(), 'play_id': uid(), 'run_id': uid(), 'device_id': uid(), 'role_ids': [uid()],
             'participant_generation': '1'}
 
 
@@ -122,7 +122,7 @@ def authority(lease, owner, rev):
 
 
 def activity(owner):
-    return {'owner': owner, 'occurrence': {'use_id': uid(), 'path': [], 'root_repeat_index': '0'},
+    return {'owner': owner, 'role_id': owner['role_ids'][0], 'occurrence': {'use_id': uid(), 'path': [], 'root_repeat_index': '0'},
             'cancellation_generation': '0'}
 
 

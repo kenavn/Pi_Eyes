@@ -87,11 +87,15 @@
         },
         "owner": {
           "$ref": "#/$defs/Owner"
+        },
+        "role_id": {
+          "$ref": "#/$defs/NonNilUuid"
         }
       },
       "additionalProperties": false,
       "required": [
         "owner",
+        "role_id",
         "occurrence",
         "cancellation_generation"
       ]
@@ -832,8 +836,13 @@
         "play_id": {
           "$ref": "#/$defs/NonNilUuid"
         },
-        "role_id": {
-          "$ref": "#/$defs/NonNilUuid"
+        "role_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonNilUuid"
+          },
+          "maxItems": 1024,
+          "minItems": 1
         },
         "run_id": {
           "$ref": "#/$defs/NonNilUuid"
@@ -851,7 +860,7 @@
         "play_id",
         "run_id",
         "device_id",
-        "role_id",
+        "role_ids",
         "participant_generation"
       ]
     },

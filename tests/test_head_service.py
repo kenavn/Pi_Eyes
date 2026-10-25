@@ -51,6 +51,29 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 'prepared_handle_id': prepared['handle_id'], 'at': None,
                 'lateness_allowance_us': '1000000', 'local_output_delay_us': 0}
 
+    async def test_role_scope_rejects_noncanonical_and_foreign_before_effects(self):
+        self.owner['role_ids'] = sorted([uid(), uid()])
+        request = {'authority': self.auth(1), 'content': self.content,
+                   'expected_facts': inspect(self.data).facts, 'resume_auto': True,
+                   'local_output_delay_us': 0}
+        for roles in ([], [self.owner['role_ids'][0]] * 2,
+                      list(reversed(self.owner['role_ids'])), [uid()] * 1025,
+                      ['00000000-0000-0000-0000-000000000000']):
+            invalid = copy.deepcopy(request)
+            invalid['authority']['owner']['role_ids'] = roles
+            with self.assertRaises(Refusal):
+                validate('prepare', invalid)
+        _, prepared = await self.prepare()
+        invalid = self.start_request(prepared)
+        invalid['activity']['role_id'] = uid()
+        before = list(self.ports.events)
+        with self.assertRaisesRegex(Refusal, 'wrong_activity'):
+            validate('start', invalid)
+        with self.assertRaisesRegex(Refusal, 'identity_conflict'):
+            self.s.start(invalid)
+        self.assertEqual(self.ports.events, before)
+        self.assertIsNone(self.s.worker_future)
+
     async def test_duplicate_conflict_stale_tombstone(self):
         request, prepared = await self.prepare()
         self.assertEqual(self.s.prepare(request)[1]['prepared'], prepared)
