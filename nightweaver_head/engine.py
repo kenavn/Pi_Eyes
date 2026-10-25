@@ -1,4 +1,5 @@
 """One synchronous output owner. Cancellation fences every authored send and loop."""
+import logging
 import os
 import socket
 import struct
@@ -8,6 +9,10 @@ import tempfile
 import threading
 import time
 from .wire import Refusal
+
+
+AUDIO_VERIFY_TIMEOUT_SECONDS = 8
+_LOG = logging.getLogger(__name__)
 
 
 class Clock:
@@ -132,10 +137,19 @@ class PygamePorts:
             stream.flush()
             code = ('import pygame,sys;pygame.mixer.init(frequency=48000,size=-16,channels=2);'
                     'pygame.mixer.music.load(sys.argv[1]);pygame.mixer.quit()')
+            started = time.monotonic()
             try:
-                subprocess.run([sys.executable, '-c', code, stream.name], timeout=4,
+                subprocess.run([sys.executable, '-c', code, stream.name], timeout=AUDIO_VERIFY_TIMEOUT_SECONDS,
                                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except (subprocess.SubprocessError, OSError):
+            except (subprocess.SubprocessError, OSError) as error:
+                category = ('timeout' if isinstance(error, subprocess.TimeoutExpired) else
+                            'nonzero' if isinstance(error, subprocess.CalledProcessError) else 'spawn')
+                status = (max(-255, min(255, error.returncode))
+                          if isinstance(error, subprocess.CalledProcessError) else None)
+                elapsed = min(86400.0, max(0.0, time.monotonic() - started))
+                # Local diagnostics deliberately exclude exception text, child output and paths.
+                _LOG.warning('audio_verify_failed category=%s elapsed_seconds=%.3f exit_status=%s',
+                             category, elapsed, status)
                 raise Refusal('audio_unavailable', 503) from None
 
     def load(self, audio):
