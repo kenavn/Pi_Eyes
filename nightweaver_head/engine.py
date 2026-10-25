@@ -211,7 +211,8 @@ class PygamePorts:
         self.sock.sendto(payload, ('127.0.0.1', port))
 
     def auto(self, enabled):
-        for command in ((b'\x00', b'\x11', b'\x13', b'\x15') if enabled
+        # Release playback-held blink latches before automatic idle modes resume.
+        for command in ((b'\x45', b'\x00', b'\x11', b'\x13', b'\x15') if enabled
                         else (b'\x01', b'\x10', b'\x12', b'\x14')):
             self.send(command, self.eye_port)
 
