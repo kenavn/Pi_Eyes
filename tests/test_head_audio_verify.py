@@ -1,5 +1,8 @@
 """Load-only verification stays isolated, bounded and private on failure."""
 import ast
+import os
+from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 import sys
 import unittest
@@ -16,7 +19,7 @@ class AudioVerifyTests(unittest.TestCase):
 
     @patch('nightweaver_head.engine.subprocess.run')
     def test_success_has_eight_second_guard_and_only_loads_audio(self, run):
-        self.ports.verify(b'private-audio')
+        resource = self.ports.prepare_audio(b'private-audio')
         run.assert_called_once()
         args, kwargs = run.call_args
         self.assertEqual(args[0][:2], [sys.executable, '-c'])
@@ -28,6 +31,16 @@ class AudioVerifyTests(unittest.TestCase):
                                  'pygame.mixer.quit'])
         self.assertIsNone(self.ports.pg)
         self.assertIsNone(self.ports.path)
+        self.assertEqual(Path(resource.path).read_bytes(), b'private-audio')
+        self.ports.pg = SimpleNamespace(mixer=SimpleNamespace(music=SimpleNamespace(
+            load=lambda path: self.assertEqual(path, resource.path), unload=lambda: None)))
+        self.ports.load(resource)
+        self.ports.dispose()
+        self.assertTrue(os.path.exists(resource.path))
+        path = resource.path
+        resource.close()
+        resource.close()
+        self.assertFalse(os.path.exists(path))
 
     def test_failures_refuse_with_only_sanitized_local_diagnostics(self):
         failures = [
@@ -43,7 +56,7 @@ class AudioVerifyTests(unittest.TestCase):
                     patch('nightweaver_head.engine.time.monotonic', side_effect=[10.0, 14.456]), \
                     self.assertLogs('nightweaver_head.engine', level='WARNING') as logs:
                 with self.assertRaises(Refusal) as refused:
-                    self.ports.verify(b'private-audio')
+                    self.ports.prepare_audio(b'private-audio')
             self.assertEqual((refused.exception.reason, refused.exception.status),
                              ('audio_unavailable', 503))
             self.assertEqual(logs.output, [
@@ -55,7 +68,7 @@ class AudioVerifyTests(unittest.TestCase):
     def test_not_ready_refuses_without_spawning(self, run):
         self.ports.ready = False
         with self.assertRaises(Refusal) as refused:
-            self.ports.verify(b'private-audio')
+            self.ports.prepare_audio(b'private-audio')
         self.assertEqual((refused.exception.reason, refused.exception.status),
                          ('audio_unavailable', 503))
         run.assert_not_called()
