@@ -11,7 +11,8 @@ import threading
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from nightweaver_head.bundle import inspect
-from nightweaver_head.engine import BundlePlayer, PygamePorts
+from nightweaver_head.engine import ProgramPlayer, PygamePorts
+from nightweaver_head.program import compile_source
 from nightweaver_head.ownership import OutputLock
 
 
@@ -27,21 +28,26 @@ def main():
     args = parser.parse_args()
     if not -5000 <= args.start_delay <= 5000:
         parser.error('motion delay must be within +/-5000ms')
-    bundle = inspect(Path(args.filename).read_bytes())
+    program = compile_source(inspect(Path(args.filename).read_bytes()),
+                             args.start_delay * 1000, not args.no_resume_auto)
     ownership = OutputLock()
     ports = PygamePorts(args.sink_name, args.eye_port, args.mouth_port)
     cancel = threading.Event()
     audio = None
     try:
         ports.initialize()
-        if bundle.audio:
-            audio = ports.prepare_audio(bundle.audio)
+        if program.audio:
+            audio = ports.prepare_audio(program.audio)
         import signal
         signal.signal(signal.SIGINT, lambda *_: cancel.set())
         signal.signal(signal.SIGTERM, lambda *_: cancel.set())
-        failure = BundlePlayer(ports).run(bundle, audio, cancel, args.start_delay * 1000, not args.no_resume_auto, args.loop)
-        if failure:
-            raise SystemExit(failure)
+        player = ProgramPlayer(ports)
+        while not cancel.is_set():
+            failure = player.run(program, audio, cancel)
+            if failure:
+                raise SystemExit(failure)
+            if not args.loop:
+                break
     finally:
         ports.close()
         if audio is not None:

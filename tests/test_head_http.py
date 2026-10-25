@@ -4,8 +4,9 @@ import tempfile
 import unittest
 from nightweaver_head.http import HTTPServer
 from nightweaver_head.service import Service
-from head_support import FakeClock, Ports, bundle, content, uid, opened, authority, activity, until
+from head_support import FakeClock, Ports, bundle, content, uid, opened, authority, activity, until, program, program_content
 from nightweaver_head.bundle import inspect
+from nightweaver_head.program import inspect_program
 
 
 class HTTPTests(unittest.IsolatedAsyncioTestCase):
@@ -78,12 +79,12 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reserved_stop_and_renew_while_six_bodies_held(self):
         opened_request, lease, owner = opened(self.service)
-        data = bundle()
-        managed = content(data)
+        data = program(owner['role_ids'][0])
+        managed = program_content(data, owner)
         from pathlib import Path
         Path(self.tmp.name, managed['identity']['sha256']).write_bytes(data)
         prepared_request = {'authority': authority(lease, owner, 1), 'content': managed,
-                            'expected_facts': inspect(data).facts, 'resume_auto': True, 'local_output_delay_us': 0}
+                            'expected_facts': inspect_program(data).facts, 'local_output_delay_us': 0}
         self.service.prepare(prepared_request)
         await until(lambda: self.service.ordinary is None)
         for _ in range(6):
@@ -111,12 +112,11 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_disconnected_admission_query_no_reexecution(self):
         request, lease, owner = opened(self.service)
-        data = bundle()
-        managed = content(data)
+        data = program(owner['role_ids'][0])
+        managed = program_content(data, owner)
         from pathlib import Path
         Path(self.tmp.name, managed['identity']['sha256']).write_bytes(data)
-        prepared = {'authority': authority(lease, owner, 1), 'content': managed, 'expected_facts': inspect(data).facts,
-                    'resume_auto': True, 'local_output_delay_us': 0}
+        prepared = {'authority': authority(lease, owner, 1), 'content': managed, 'expected_facts': inspect_program(data).facts, 'local_output_delay_us': 0}
         await self.request('/head-control/v1/prepare', prepared)
         await until(lambda: self.service.ordinary is None)
         handle = next(iter(self.service.prepared))
@@ -133,7 +133,7 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         identity = {k: start['authority'][k] for k in ('session', 'owner', 'operation_revision')}
         self.assertEqual((await self.request('/head-control/v1/operations/lookup', identity))[1]['terminal_reason'], 'completed')
         await self.request('/head-control/v1/start', start)
-        self.assertEqual(sum(e[0] == 'frame' for e in self.service.ports.events), 1)
+        self.assertEqual(sum(e[0] == 'frame' for e in self.service.ports.events), 2)
 
     async def test_header_idle_and_absolute_deadline(self):
         self.server.idle = .01
@@ -155,11 +155,11 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         import threading
         from pathlib import Path
         opened_request, lease, owner = opened(self.service)
-        data = bundle()
-        managed = content(data)
+        data = program(owner['role_ids'][0])
+        managed = program_content(data, owner)
         Path(self.tmp.name, managed['identity']['sha256']).write_bytes(data)
         self.service.prepare({'authority': authority(lease, owner, 1), 'content': managed,
-                              'expected_facts': inspect(data).facts, 'resume_auto': True, 'local_output_delay_us': 0})
+                              'expected_facts': inspect_program(data).facts, 'local_output_delay_us': 0})
         await until(lambda: self.service.ordinary is None)
         gate, entered = threading.Event(), threading.Event()
         def held_disk():
@@ -184,11 +184,11 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         clock = FakeClock()
         self.service.clock = self.service.store.clock = self.service.engine.clock = clock
         opened_request, lease, owner = opened(self.service)
-        data = bundle()
-        managed = content(data)
+        data = program(owner['role_ids'][0])
+        managed = program_content(data, owner)
         Path(self.tmp.name, managed['identity']['sha256']).write_bytes(data)
         self.service.prepare({'authority': authority(lease, owner, 1), 'content': managed,
-                              'expected_facts': inspect(data).facts, 'resume_auto': True, 'local_output_delay_us': 0})
+                              'expected_facts': inspect_program(data).facts, 'local_output_delay_us': 0})
         await until(lambda: self.service.ordinary is None)
         uploaded = b'held synthetic transfer bytes'
         transfer = {'device_boot_id': self.service.boot, 'job_id': uid(), 'content': content(uploaded)}

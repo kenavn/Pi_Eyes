@@ -11,7 +11,8 @@ The exact generated schemas in `nightweaver_head/contracts/` are copied byte-for
 from Nightweaver commit `a8991e1`,
 `contracts/head-control.schema.json`, `contracts/device-content.schema.json` and
 `contracts/head-program.schema.json`. This is the N449 frozen contract checkpoint;
-dependent service/native implementation is still in progress and is not qualified.
+the runtime consumes whole-show program archives with retained parent-native selection.
+Software checks do not qualify the installed native target.
 The normative route/authority/timing contract is that commit's
 `docs/contracts/head-control.md`. Schema regeneration belongs to Nightweaver;
 update the provenance and conformance fixtures together after an approved contract change.
@@ -42,29 +43,49 @@ incrementally on a separate bounded filesystem owner. At most8 disk requests can
 pending, even if the filesystem stalls. Stop and lease expiry never wait for that owner.
 
 One session has a3s lease (renew each1s), one playback worker, one ordinary inspection/
-control job,8 immutable prepared handles,64 ordinary receipts plus an independent Stop
+control job,1 immutable retained prepared program,64 ordinary receipts plus an independent Stop
 receipt,4096 complete activity tombstones and256MiB prepared expansion reservation.
 Exact retained mutations return observations without executing again. Query the exact
 operation after connection loss. Expiry retires output and cannot be resurrected.
-Stop targets the latest admitted activity or a captured owner before first Start. It
-retires that owner before cancellation. Stale StopA after B admission refuses with no
-side effects. Natural occurrence completion does not retire an owner.
+Stop targets the latest complete aggregate activity, fences all future starts of that
+actual run, and joins its worker while retaining the prepared decoder. A later actual
+run or root repeat uses the same selection. Stale StopA after B admission refuses
+without cancellation. Disarm and lease expiry retire preparation, join active work,
+and dispose native selection and pins. Disarm shares the reserved Stop admission slot.
+Neither a timeout nor unknown cleanup proves quiet.
 
-Preparation validates bounded ZIP/CSV and PCM16/IEEEfloat32 RIFF facts, then verifies
-required audio loading in a separate bounded pygame subprocess. It does not replace the
-active music slot. Only the sole output worker selects audio and sends local UDP. The
-worker owns motion, decoder observations, cancellation, final delayed motion tail,
-autonomous-eye restoration and temporary audio disposal. No required-audio failure is
-treated as audio-less playback. Stop/expiry prevent future loop or authored-frame output.
-Unknown cleanup retains ownership; settled means software output/worker disposal, not
-physical motor stillness or drained downstream speakers.
+Preparation accepts only a compiled program ZIP: `manifest.json`, `events.jsonl`,
+and optional WAV `audio.dat`. It validates generated wire fields, exact rational
+coordinates, ordered role/occurrence/source identities, complete Begin/End pairs,
+source extents, native frame placement and finite archive/event/reservation bounds.
+No archive paths are extracted. PCM16/IEEEfloat32 WAV retains the explicit native
+sample rate and mono/stereo layout; malformed or mismatched audio fails preparation.
+The separate `/inspect` route still ingests authored `.skelanim` source ZIP/CSV and
+returns import BundleFacts, not ProgramFacts or a runtime handle.
+
+During quiet setup, Prepare checks the production Ethernet route afresh and actually
+selects required audio with this process's initialized pygame mixer. It performs no
+Play, authored UDP, mode output, subprocess decoder verification, or fabricated
+pre-play position observation. One native music selection means one retained program.
+Ready is published only after inspection and native selection return. Start/repeat
+perform no load, temporary-file creation, process launch or new audio connection.
+
+One continuous real decoder cursor drives every authored use and gap. Event coordinates
+already include captured motion delay; the endpoint does not apply it a second time.
+At a shared boundary the old final motion precedes old End, new Begin and new motion.
+End restores idle only for authored `resume_auto=true`, releasing blink holds with
+0x45 before automatic modes; false leaves the modes disabled through the gap.
+A terminal −1 cursor continues a bounded tail from the last real observation; ending
+before any valid decoder position fails. Audio-less programs contribute no native voice
+and use the injected monotonic clock. Final samples/modes run once. Stop joins and
+restores the currently active use without replacing its retained selection. Disarm
+replaces the stopped decoder with an unplayed tiny buffer compatible with pygame1.9.6;
+no unsupported `music.unload` call or package upgrade is used.
 
 Scheduled starts use captured Host clock mapping when Ready/Degraded. Unknown mapping
-acts on receipt and reports `no_clock`. Lateness is checked again after audio selection,
-immediately before output. Positive local delay withholds all authored motion before
-its due decoder position. A terminal−1 decoder position continues a bounded tail from
-the last real observation; ending before any real position fails. Long-play rate
-following, pause, seek, nonzero rehearsal origins and MP3 are unsupported.
+acts on receipt and reports `no_clock`. Lateness is fenced immediately before output.
+Long-play rate following, pause, seek, nonzero rehearsal origins and MP3 are unsupported.
+Settled proves software calls/joins, not physical motor stillness or downstream drain.
 
 Managed content is published by SHA256 only after exact length/hash, flush, fsync,
 atomic rename and directory fsync. Failed/partial uploads never appear in inventory.
@@ -116,7 +137,9 @@ Do not run unattended playback or send test eye/jaw commands.
 The service and maintenance CLI acquire the same `/run/pi-eyes-head/output.lock` before
 hardware initialization. The lock directory must already exist with service-private
 permissions (systemd creates it). `editor/bundlePlayer.py` is an explicit local maintenance
-CLI using this same engine, with required `--sink-name`, optional `--loop`,
+CLI accepting the explicitly preserved `.skelanim` authoring input. Setup compiles
+one local ProgramUse and selects native audio once; it uses the same ProgramPlayer
+for each retained repeat, with required `--sink-name`, optional `--loop`,
 `--no-resume-auto` and motion `--start-delay` milliseconds. Its UDP destination is local
 loopback only. Stop the service and obtain operator authorization before using it.
 
@@ -137,7 +160,32 @@ physical movement, optical timing or full-show acceptance.
 
 Owner requires `role_ids`, the complete sorted unique nonempty role UUID set,
 maximum 1024. Empty, duplicate, unsorted, invalid or oversized sets refuse.
-ActivityIdentity requires the actual occurrence `role_id`, which must belong to
-that Owner. The participant Owner remains immutable across natural A-to-B role
-changes; compatible preparation is role-neutral and shares its prepared handle.
-The scalar Owner.role_id contract is removed without a compatibility alias.
+Preparation Owner captures preparation ID/revision/full Prepare command, without a
+future run. ActivityIdentity captures the actual cue command, run/play/root-repeat and
+cancellation generation. Actual role, full authored occurrence path and source-row
+identity remain in the immutable program manifest/events. Every use role must belong
+to Owner.role_ids. Shared content transfer uses Managed or PreparedProgram references;
+generated program bytes have no invented managed asset/version identity.
+
+### NIGHT-451 retained-program author checks
+
+The replacement removes the subprocess verifier and per-occurrence BundlePlayer.
+Source ingestion remains solely for import inspection and the explicitly required
+local authoring maintenance CLI. Program archives are bounded to64MiB compressed,
+256MiB expanded,1024 uses and100000 events; manifest metadata is at most1MiB and
+one event line at most4KiB. Prepared archive/audio reservations remain at most256MiB.
+Native source audio accepts PCM16 or finite float32, mono/stereo,8000..192000Hz.
+One common format is explicit in the immutable program; the endpoint does not convert
+heterogeneous source formats or invent managed versions for prepared bytes.
+
+Author validation uses the private existing Python3.9.25 and3.14.6 peer environments
+with h11 installed:44 head tests pass on each. Coverage includes closed archive/wire
+validation, complete source identities and captured delay, exact fractional boundaries,
+gaps and final modes, source import, retained native selection without setup output,
+Stop/repeat/Disarm, stale activity rejection, held native preparation/restoration/
+disposal joins, expiry, unknown cleanup, reserved HTTP capacity and the real UDP eye
+consumer's0x45 release. Compileall and whitespace checks pass. All three vendored
+schemas match frozen Nightweaver `a8991e1` byte-for-byte. These are author checks;
+independent review, cross-language integrated acceptance and installed native/physical
+qualification remain separate coordinator gates. No device output or deployment was
+performed for these tests.

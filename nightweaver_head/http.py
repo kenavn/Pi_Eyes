@@ -52,14 +52,15 @@ class HTTPServer:
         return True
 
     def classify(self, path):
-        reserved = path in ('/head-control/v1/stop', '/head-control/v1/sessions/renew')
+        reservation = '/head-control/v1/stop' if path == '/head-control/v1/disarm' else path
+        reserved = reservation in ('/head-control/v1/stop', '/head-control/v1/sessions/renew')
         observation = path in ('/head-control/v1/status', '/head-control/v1/capabilities',
                                '/head-control/v1/operations/lookup', '/device-content/v1/transfers/lookup')
         if reserved:
-            if path in self.reserved:
+            if reservation in self.reserved:
                 raise Refusal('capacity', 429)
-            self.reserved.add(path)
-            return ('reserved', path)
+            self.reserved.add(reservation)
+            return ('reserved', reservation)
         if self.ordinary >= 6 or observation and self.observers >= 2:
             raise Refusal('capacity', 429)
         self.ordinary += 1

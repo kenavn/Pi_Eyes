@@ -7,9 +7,9 @@ import threading
 import unittest
 from unittest.mock import Mock
 
-from nightweaver_head.engine import BundlePlayer, PygamePorts
-from nightweaver_head.bundle import inspect
-from head_support import FakeClock, bundle
+from nightweaver_head.engine import ProgramPlayer, PygamePorts
+from nightweaver_head.program import inspect_program
+from head_support import FakeClock, program
 
 
 class EyeConsumer:
@@ -82,9 +82,9 @@ class IdleRestoreTests(unittest.TestCase):
                     original_frame(value)
                     cancelled.set()
                 ports.frame = frame
-                animation = inspect(bundle(['0,eye,0.5,0.5,True,True,False,None']))
-                failure = BundlePlayer(ports, FakeClock()).run(
-                    animation, None, cancelled, resume_auto=resume)
+                animation = inspect_program(program(resume=resume, eye=True))
+                consumer.receive(b'\x44')
+                failure = ProgramPlayer(ports, FakeClock()).run(animation, None, cancelled)
                 self.assertIsNone(failure)
                 if resume:
                     self.assert_idle(consumer)

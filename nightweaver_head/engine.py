@@ -1,20 +1,13 @@
 """One synchronous output owner. Cancellation fences every authored send and loop."""
 import io
-import logging
 import os
 import socket
 import struct
-import subprocess
-import sys
 import tempfile
-import threading
 import time
 import wave
 from .wire import Refusal
-
-
-AUDIO_VERIFY_TIMEOUT_SECONDS = 8
-_LOG = logging.getLogger(__name__)
+from .bundle import Frame
 
 
 class Clock:
@@ -36,110 +29,104 @@ class PreparedAudio:
             self.path = None
 
 
-class BundlePlayer:
-    """Reusable engine; preparing immutable bundles never selects the music slot."""
+class ProgramPlayer:
+    """A whole immutable program borrows the already-selected native decoder."""
     def __init__(self, ports, clock=None):
         self.ports = ports
         self.clock = clock or Clock()
         self.audio_position_us = None
 
-    def run(self, bundle, audio, cancelled, delay_us=0, resume_auto=True, loop=False, started=None, fence=None, target=None):
-        failure = None
+    def run(self, program, audio, cancelled, started=None, fence=None, target=None):
+        failure, active_use = None, None
+        if hasattr(self.ports, 'bind_cancellation'):
+            self.ports.bind_cancellation(cancelled)
         try:
+            while target is not None and self.clock.now() < target and not cancelled.is_set():
+                if fence:
+                    fence()
+                self.clock.wait(cancelled, min(1000, target - self.clock.now()))
+            if cancelled.is_set():
+                return None
+            if fence:
+                fence()
+            if program.audio and audio is None:
+                raise Refusal('audio_unavailable', 503)
+            origin = self.clock.now()
+            if program.audio:
+                self.ports.play()
+            if started:
+                started()
+            index, last_position, last_observed = 0, None, None
+            physical = int(program.facts['duration_us'])
+            if program.facts['audio'] is not None:
+                facts = program.facts['audio']
+                physical = max(physical, (int(facts['frames']) * 1000000 + facts['sample_rate'] - 1) // facts['sample_rate'])
             while not cancelled.is_set():
-                if fence:
-                    fence()
-                if bundle.audio:
-                    self.ports.load(audio)
-                if cancelled.is_set():
-                    break
-                if fence:
-                    fence()
-                if target is not None:
-                    while not cancelled.is_set() and self.clock.now() < target:
-                        self.clock.wait(cancelled, min(1000, target - self.clock.now()))
-                        if fence:
-                            fence()
-                    target = None
-                if cancelled.is_set():
-                    break
-                if fence:
-                    fence()
-                self.ports.auto(False)
-                if cancelled.is_set():
-                    break
-                if fence:
-                    fence()
-                origin = self.clock.now()
-                if bundle.audio:
-                    self.ports.play()
-                if started:
-                    started()
-                index, last_position, last_observed = 0, None, None
-                physical = max(int(bundle.facts['audio_extent_us']),
-                               int(bundle.facts['movement_extent_us']) + max(0, delay_us)
-                               if bundle.frames else 0)
-                while not cancelled.is_set():
-                    now = self.clock.now()
-                    elapsed = now - origin
-                    if elapsed > physical + 5000000:
-                        raise Refusal('worker_failure', 503)
-                    if bundle.audio:
-                        position = self.ports.position()
-                        busy = self.ports.busy()
-                        if position >= 0:
-                            # Decoder observations must never move source motion backwards.
-                            last_position = max(position, last_position or 0)
-                            last_observed = now
-                            self.audio_position_us = last_position
-                            progress = last_position
-                        elif last_position is None:
-                            if not busy or elapsed >= 5000000:
-                                raise Refusal('worker_failure', 503)
-                            self.clock.wait(cancelled, 1000)
-                            continue
-                        elif busy:
-                            # A transient -1 while busy is not decoder completion.
-                            self.clock.wait(cancelled, 1000)
-                            continue
-                        else:
-                            progress = last_position + now - last_observed
+                now = self.clock.now()
+                elapsed = now - origin
+                if elapsed > physical + 5000000:
+                    raise Refusal('worker_failure', 503)
+                if program.audio:
+                    position, busy = self.ports.position(), self.ports.busy()
+                    if position >= 0:
+                        last_position = max(position, last_position or 0)
+                        last_observed = now
+                        self.audio_position_us = last_position
+                        progress = last_position
+                    elif last_position is None:
+                        if not busy or elapsed >= 5000000:
+                            raise Refusal('worker_failure', 503)
+                        self.clock.wait(cancelled, 1000)
+                        continue
+                    elif busy:
+                        self.clock.wait(cancelled, 1000)
+                        continue
                     else:
-                        busy = False
-                        progress = elapsed
-                    if progress >= max(0, delay_us):
-                        source = progress - max(0, delay_us)
-                        while index < len(bundle.frames) and bundle.frames[index].at_us <= source:
-                            if cancelled.is_set():
-                                break
-                            self.ports.frame(bundle.frames[index])
-                            index += 1
-                    if progress >= physical and not busy and index == len(bundle.frames):
+                        progress = last_position + now - last_observed
+                else:
+                    progress, busy = elapsed, False
+                while index < len(program.events) and program.events[index][0] <= progress:
+                    if cancelled.is_set():
                         break
-                    self.clock.wait(cancelled, 1000)
-                if not loop or cancelled.is_set():
+                    _, event = program.events[index]
+                    use = program.manifest['uses'][int(event['use_id'])]
+                    kind = event['event']['kind']
+                    if kind == 'begin':
+                        active_use = use
+                        self.ports.auto(False)
+                    elif kind == 'end':
+                        if use['resume_auto']:
+                            self.ports.auto(True)
+                        active_use = None
+                    else:
+                        payload = event['event']
+                        values = ((payload['position'],) if kind == 'mouth' else
+                                  (payload['x'], payload['y'], payload['left_closed'],
+                                   payload['right_closed'], payload['both_closed']))
+                        self.ports.frame(Frame(progress, kind, values))
+                    index += 1
+                if progress >= physical and not busy and index == len(program.events):
                     break
-                self.ports.stop()
+                self.clock.wait(cancelled, 1000)
         except Refusal as error:
             failure = error.reason
         except Exception:
             failure = 'worker_failure'
         finally:
-            # Return only after stop, restoration and disposal have actually returned.
             try:
                 self.ports.stop()
-                if resume_auto:
+                if active_use is not None and active_use['resume_auto']:
                     self.ports.auto(True)
-                self.ports.dispose()
             except Exception:
                 failure = 'unknown_outcome'
         return failure
 
 
 class PygamePorts:
-    """Lazy production adapter; only the worker touches process-global music."""
-    def __init__(self, sink_name, eye_port=5005, mouth_port=5006):
+    """Lazy production adapter; sole output owner selects during quiet setup."""
+    def __init__(self, sink_name, eye_port=5005, mouth_port=5006, route_check=None):
         self.sink_name, self.eye_port, self.mouth_port = sink_name, eye_port, mouth_port
+        self.route_check = route_check
         self.pg = self.sock = self.path = None
         self.idle_audio = None
         self.ready = False
@@ -155,92 +142,33 @@ class PygamePorts:
         self.ready = True
 
     def prepare_audio(self, audio):
-        """Write and verify once without touching the active music selection."""
-        if not self.ready:
+        """Select on this process's initialized mixer, only during quiet Prepare."""
+        if not self.ready or not self.pg.mixer.get_init():
             raise Refusal('audio_unavailable', 503)
+        if self.route_check is not None:
+            try:
+                self.route_check()
+            except Exception:
+                raise Refusal('audio_unavailable', 503) from None
         fd, path = tempfile.mkstemp(suffix='.wav')
         resource = PreparedAudio(path)
         try:
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(audio)
-            read_fd = write_fd = -1
-            try:
-                try:
-                    read_fd, write_fd = os.pipe()
-                    os.set_blocking(read_fd, False)
-                except OSError:
-                    for diagnostic_fd in (read_fd, write_fd):
-                        if diagnostic_fd >= 0:
-                            os.close(diagnostic_fd)
-                    read_fd = write_fd = -1
-                code = """import os, sys
-fd = int(sys.argv[2])
-def mark(stage):
-    try:
-        os.write(fd, (stage + '\\n').encode('ascii'))
-    except OSError:
-        pass
-mark('bootstrap')
-mark('import_begin')
-import pygame
-mark('import_done')
-mark('init_begin')
-pygame.mixer.init(frequency=48000, size=-16, channels=2)
-mark('init_done')
-mark('load_begin')
-pygame.mixer.music.load(sys.argv[1])
-mark('load_done')
-mark('quit_begin')
-pygame.mixer.quit()
-mark('quit_done')
-"""
-                started = time.monotonic()
-                try:
-                    subprocess.run([sys.executable, '-c', code, path, str(write_fd)],
-                                   timeout=AUDIO_VERIFY_TIMEOUT_SECONDS, check=True,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   pass_fds=(write_fd,) if write_fd >= 0 else ())
-                except (subprocess.SubprocessError, OSError) as error:
-                    # run has joined the child, including after timeout: never wait for EOF.
-                    last_stage = 'unknown'
-                    if read_fd >= 0:
-                        try:
-                            records = os.read(read_fd, 1024).split(b'\n')[:-1]
-                        except OSError:
-                            records = ()
-                        stages = {b'bootstrap', b'import_begin', b'import_done', b'init_begin',
-                                  b'init_done', b'load_begin', b'load_done', b'quit_begin',
-                                  b'quit_done'}
-                        for record in records:
-                            if record in stages:
-                                last_stage = record.decode('ascii')
-                    category = ('timeout' if isinstance(error, subprocess.TimeoutExpired) else
-                                'nonzero' if isinstance(error, subprocess.CalledProcessError) else 'spawn')
-                    status = (max(-255, min(255, error.returncode))
-                              if isinstance(error, subprocess.CalledProcessError) else None)
-                    elapsed = min(86400.0, max(0.0, time.monotonic() - started))
-                    _LOG.warning('audio_verify_failed category=%s elapsed_seconds=%.3f exit_status=%s '
-                                 'last_stage=%s', category, elapsed, status, last_stage)
-                    raise Refusal('audio_unavailable', 503) from None
-            finally:
-                for diagnostic_fd in (read_fd, write_fd):
-                    if diagnostic_fd >= 0:
-                        os.close(diagnostic_fd)
+            self.load(resource)
             return resource
-        except BaseException as error:
-            try:
-                resource.close()
-            except Exception:
-                # Preserve ownership when unlink cannot be proven; never advertise quiet.
-                error.prepared_audio = resource
-            raise
+        except Exception as error:
+            # Failed SDL selection can still own the input until quiet disposal joins.
+            refusal = Refusal('audio_unavailable', 503)
+            refusal.prepared_audio = resource
+            raise refusal from error
 
     def load(self, audio):
+        self.path = audio.path
         self.pg.mixer.music.load(audio.path)
         if self.idle_audio is not None:
             self.idle_audio.close()
             self.idle_audio = None
-        self.path = audio.path
 
     def play(self):
         self.pg.mixer.music.play()
@@ -255,23 +183,28 @@ mark('quit_done')
         if self.pg is not None:
             self.pg.mixer.music.stop()
 
-    def send(self, payload, port):
+    def bind_cancellation(self, cancelled):
+        self.cancelled = cancelled
+
+    def send(self, payload, port, authored=False):
+        if authored and getattr(self, 'cancelled', None) is not None and self.cancelled.is_set():
+            return
         self.sock.sendto(payload, ('127.0.0.1', port))
 
     def auto(self, enabled):
         # Release playback-held blink latches before automatic idle modes resume.
         for command in ((b'\x45', b'\x00', b'\x11', b'\x13', b'\x15') if enabled
                         else (b'\x01', b'\x10', b'\x12', b'\x14')):
-            self.send(command, self.eye_port)
+            self.send(command, self.eye_port, authored=not enabled)
 
     def frame(self, frame):
         if frame.kind == 'mouth':
-            self.send(b'\x50' + struct.pack('B', *frame.values), self.mouth_port)
+            self.send(b'\x50' + struct.pack('B', *frame.values), self.mouth_port, authored=True)
         else:
             x, y, left, right, both = frame.values
-            self.send(b'\x20' + struct.pack('BB', int(x * 255), int(y * 255)), self.eye_port)
-            self.send(b'\x40' if left or both else b'\x41', self.eye_port)
-            self.send(b'\x42' if right or both else b'\x43', self.eye_port)
+            self.send(b'\x20' + struct.pack('BB', int(x * 255), int(y * 255)), self.eye_port, authored=True)
+            self.send(b'\x40' if left or both else b'\x41', self.eye_port, authored=True)
+            self.send(b'\x42' if right or both else b'\x43', self.eye_port, authored=True)
 
     def dispose(self):
         if self.pg is not None and self.path is not None:

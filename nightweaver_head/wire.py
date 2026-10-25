@@ -1,5 +1,6 @@
 """Small fail-closed interpreter for the vendored generated contract vocabulary."""
 import json
+import math
 import re
 import uuid
 from pathlib import Path
@@ -29,7 +30,7 @@ def decode(data):
 
 
 SCHEMAS = {name: json.loads((Path(__file__).parent / 'contracts' / (name + '.schema.json')).read_text())
-           for name in ('head-control', 'device-content')}
+           for name in ('head-control', 'device-content', 'head-program')}
 
 
 def validate(name, value, family='head-control'):
@@ -44,8 +45,8 @@ def check(node, value, root):
         for part in node['$ref'].split('/')[1:]:
             target = target[part]
         return check(target, value, root)
-    if 'anyOf' in node:
-        for variant in node['anyOf']:
+    if 'anyOf' in node or 'oneOf' in node:
+        for variant in node.get('anyOf', node.get('oneOf')):
             try:
                 return check(variant, value, root)
             except Refusal:
@@ -65,6 +66,8 @@ def check(node, value, root):
     if 'enum' in node and value not in node['enum']:
         raise Refusal('malformed')
     if 'const' in node and value != node['const']:
+        raise Refusal('malformed')
+    if type(value) is float and not math.isfinite(value):
         raise Refusal('malformed')
     if kind == 'object':
         props = node.get('properties', {})
