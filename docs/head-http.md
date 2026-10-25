@@ -130,3 +130,12 @@ CI runs these checks on Python3.9 and3.14 without pygame or hardware. Synthetic 
 fixtures match the independent Nightweaver head-integration probe. Automated success
 does not verify installed target pygame decoding, route/firewall, speaker drain,
 physical movement, optical timing or full-show acceptance.
+
+### Participant role scope (NIGHT-433)
+
+Owner requires `role_ids`, the complete sorted unique nonempty role UUID set,
+maximum 1024. Empty, duplicate, unsorted, invalid or oversized sets refuse.
+ActivityIdentity requires the actual occurrence `role_id`, which must belong to
+that Owner. The participant Owner remains immutable across natural A-to-B role
+changes; compatible preparation is role-neutral and shares its prepared handle.
+The scalar Owner.role_id contract is removed without a compatibility alias.
