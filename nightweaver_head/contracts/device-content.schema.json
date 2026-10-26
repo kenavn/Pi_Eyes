@@ -96,6 +96,69 @@
         "identity"
       ]
     },
+    "ContentRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "asset_id": {
+              "$ref": "#/$defs/NonNilUuid"
+            },
+            "identity": {
+              "$ref": "#/$defs/ContentIdentity"
+            },
+            "kind": {
+              "type": "string",
+              "const": "managed"
+            },
+            "version_id": {
+              "$ref": "#/$defs/NonNilUuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "asset_id",
+            "version_id",
+            "identity"
+          ]
+        },
+        {
+          "description": "Generated preparation bytes have no catalogue asset/version identity.",
+          "type": "object",
+          "properties": {
+            "device_id": {
+              "$ref": "#/$defs/NonNilUuid"
+            },
+            "identity": {
+              "$ref": "#/$defs/ContentIdentity"
+            },
+            "kind": {
+              "type": "string",
+              "const": "prepared_program"
+            },
+            "play_id": {
+              "$ref": "#/$defs/NonNilUuid"
+            },
+            "preparation_id": {
+              "$ref": "#/$defs/NonNilUuid"
+            },
+            "ready_set_revision": {
+              "$ref": "#/$defs/PositiveCounter"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "preparation_id",
+            "ready_set_revision",
+            "device_id",
+            "play_id",
+            "identity"
+          ]
+        }
+      ]
+    },
     "Counter": {
       "type": "string",
       "maxLength": 19,
@@ -153,26 +216,6 @@
         "device_boot_id",
         "entries",
         "truncated"
-      ]
-    },
-    "ManagedContent": {
-      "type": "object",
-      "properties": {
-        "asset_id": {
-          "$ref": "#/$defs/NonNilUuid"
-        },
-        "identity": {
-          "$ref": "#/$defs/ContentIdentity"
-        },
-        "version_id": {
-          "$ref": "#/$defs/NonNilUuid"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "asset_id",
-        "version_id",
-        "identity"
       ]
     },
     "NonNilUuid": {
@@ -246,7 +289,7 @@
       "type": "object",
       "properties": {
         "content": {
-          "$ref": "#/$defs/ManagedContent"
+          "$ref": "#/$defs/ContentRef"
         },
         "device_boot_id": {
           "$ref": "#/$defs/NonNilUuid"

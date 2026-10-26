@@ -90,6 +90,7 @@ class Ports:
         self.events.append(('prepare_audio', len(audio)))
         resource = Audio(audio)
         self.resources.append(resource)
+        self.load(resource)
         return resource
 
     def load(self, audio):
@@ -130,8 +131,8 @@ class Ports:
 def owner(epoch):
     return {'command': {'process_epoch': epoch, 'command': {'nonce': uid(), 'window_sequence': '1'}},
             'coordinator_epoch': epoch, 'loaded': {'project': {'project_id': uid(), 'revision': '1'}, 'context_generation': '1'},
-            'stage_id': uid(), 'play_id': uid(), 'run_id': uid(), 'device_id': uid(), 'role_ids': [uid()],
-            'participant_generation': '1'}
+            'stage_id': uid(), 'preparation_id': uid(), 'ready_set_revision': '1', 'device_id': uid(),
+            'role_ids': [uid()], 'participant_generation': '1'}
 
 
 def opened(service, mapping=None):
@@ -147,13 +148,74 @@ def authority(lease, owner, rev):
     return {k: lease[k] for k in ('session', 'lease_token')} | {'owner': owner, 'operation_revision': str(rev)}
 
 
-def activity(owner):
-    return {'owner': owner, 'role_id': owner['role_ids'][0], 'occurrence': {'use_id': uid(), 'path': [], 'root_repeat_index': '0'},
-            'cancellation_generation': '0'}
+_play_ids = {}
+_activation_generations = {}
+
+
+def play_id(owner):
+    return _play_ids.setdefault(owner['preparation_id'], uid())
+
+
+def activity(owner, generation=None, repeat=0):
+    if generation is None:
+        generation = _activation_generations.get(owner['preparation_id'], 0) + 1
+        _activation_generations[owner['preparation_id']] = generation
+    return {'owner': owner, 'cue_command': {'process_epoch': owner['coordinator_epoch'],
+            'command': {'nonce': uid(), 'window_sequence': '2'}}, 'run_id': uid(), 'play_id': play_id(owner),
+            'root_repeat_index': str(repeat), 'cancellation_generation': '0',
+            'activation_generation': str(generation)}
 
 
 def content(data):
-    return {'asset_id': uid(), 'version_id': uid(), 'identity': {'sha256': hashlib.sha256(data).hexdigest(), 'length': str(len(data))}}
+    return {'kind': 'managed', 'asset_id': uid(), 'version_id': uid(),
+            'identity': {'sha256': hashlib.sha256(data).hexdigest(), 'length': str(len(data))}}
+
+
+def program_content(data, owner):
+    return {**{k: owner[k] for k in ('preparation_id', 'ready_set_revision', 'device_id')},
+            'play_id': play_id(owner), 'identity': content(data)['identity']}
+
+
+def time_at(us, numerator=0, denominator=1):
+    return {'whole_us': str(us), 'numerator': str(numerator), 'denominator': str(denominator)}
+
+
+def program(role=None, audio=None, resume=True, gap=1000, eye=False, delay=0):
+    from nightweaver_head.bundle import wav_facts
+    role = role or uid()
+    uses, events = [], []
+    for index, (start, end) in enumerate(((0, 2000), (2000 + gap, 5000 + gap))):
+        uses.append({'id': str(index), 'role_id': role, 'occurrence': {'use_id': uid(), 'path': []},
+                     'start': time_at(start), 'end': time_at(end), 'resume_auto': resume,
+                     'audio_start_frame': str((start * 48000 + 999999) // 1000000) if audio else '0',
+                     'source_content': {k: v for k, v in content(b'synthetic-original-source').items() if k != 'kind'},
+                     'source_audio': ({'encoding': 'pcm_s16_le', 'frames': '48',
+                                       'sample_rate': 48000, 'channels': wav_facts(audio)[0]['channels']} if audio else None),
+                     'native_audio_frames': '48' if audio else '0', 'source_movement_extent_us': '1001'})
+        for at, kind in ((start, 'begin'), (start + 1000 + delay, 'mouth'), (end, 'end')):
+            payload = {'kind': kind}
+            if kind == 'mouth':
+                payload.update(source_index='0', position=100 + index)
+            if kind == 'mouth' and eye:
+                payload = {'kind': 'eye', 'source_index': '0', 'x': 0.5, 'y': 0.5,
+                           'left_closed': True, 'right_closed': True, 'both_closed': False}
+            events.append({'at': time_at(at), 'use_id': str(index), 'event': payload})
+    manifest = {'format': 'nightweaver_head_program_1', 'duration_us': str(5000 + gap),
+                'audio': None, 'uses': uses, 'event_count': str(len(events))}
+    if audio:
+        from nightweaver_head.bundle import wav_facts
+        manifest['audio'] = wav_facts(audio)[0]
+    return archive_program(manifest, events, audio)
+
+
+def archive_program(manifest, events, audio=None):
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, 'w', zipfile.ZIP_STORED) as archive:
+        archive.writestr('manifest.json', json.dumps(manifest))
+        archive.writestr('events.jsonl', ''.join(json.dumps(e) + '\n' for e in events))
+        if audio:
+            archive.writestr('audio.dat', audio)
+    return stream.getvalue()
 
 
 async def until(predicate):

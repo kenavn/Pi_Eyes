@@ -9,10 +9,12 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
-from .bundle import Bundle, inspect
+from .bundle import inspect
+from .program import Program, inspect_program
 from .content import ContentStore
-from .engine import BundlePlayer, Clock, PreparedAudio
+from .engine import ProgramPlayer, Clock, PreparedAudio
 from .wire import Refusal, validate
+from .program_limits import PROGRAM_BYTES, PREPARED_BYTES, MANIFEST_PARSE_BYTES
 
 
 def uid():
@@ -23,23 +25,16 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'))
 
 
-def validate_facts(facts):
-    audio, extent = facts['audio'], int(facts['audio_extent_us'])
-    if audio is None:
-        if extent:
-            raise Refusal('malformed')
-    elif extent != (int(audio['frames']) * 1000000 + audio['sample_rate'] - 1) // audio['sample_rate']:
-        raise Refusal('malformed')
-    movement, logical = int(facts['movement_extent_us']), int(facts['logical_extent_us'])
-    if (max(extent, movement) != logical or logical > 900000000
-            or bool(movement) != (facts['has_eye_motion'] or facts['has_mouth_motion'])):
-        raise Refusal('malformed')
+def activation_identity(activity):
+    """One actual cue lease persists across repeats and transport generations."""
+    return canonical({k: v for k, v in activity.items()
+                      if k not in ('root_repeat_index', 'cancellation_generation')})
 
 
 @dataclass(frozen=True)
 class PreparedEntry:
     metadata: dict
-    bundle: Bundle
+    bundle: Program
     config: dict
     audio: Optional[PreparedAudio]
 
@@ -70,14 +65,19 @@ class Service:
         self.stop_receipt = None
         self.prepared = {}
         self.provisional_audio = None
-        self.tombstones = set()
+        self.activation_high = 0
+        self.retired_activation_high = 0
+        self.admitted_repeat = self.completed_repeat = -1
+        self.disarm_result = None
+        self.cleanup_task = None
+        self.cleanup_started = None
         self.latest_activity = None
         self.latest_result = None
         self.ordinary = self.control_task = None
         self.worker = self.worker_future = self.cancelled = None
         self.worker_deadline = None
         self.worker_timed_out = False
-        self.engine = BundlePlayer(ports, self.clock)
+        self.engine = ProgramPlayer(ports, self.clock)
         self.inspector = ThreadPoolExecutor(max_workers=1, thread_name_prefix='head-inspect')
         self.output = ThreadPoolExecutor(max_workers=1, thread_name_prefix='head-output')
         self.disk = ThreadPoolExecutor(max_workers=1, thread_name_prefix='head-content')
@@ -106,6 +106,12 @@ class Service:
             self.worker_timed_out = True
             self.cancelled.set()
             self.worker.update(phase='unknown', settlement='unknown', failure='unknown_outcome')
+        if self.retired and self.prepared and self.worker_future is None and self.ordinary is None and self.cleanup_task is None:
+            self.cleanup_started = self.now()
+            self.cleanup_task = asyncio.create_task(self.dispose_preparation())
+        if (self.disarm_result is not None and not self.quiet_without_tick()
+                and self.now() - int(self.disarm_result['observed_local_us']) >= 5000000):
+            self.disarm_result.update(phase='unknown', settlement='unknown', failure='unknown_outcome')
         if self.worker is not None and self.engine.audio_position_us is not None:
             self.worker['audio_position_us'] = str(self.engine.audio_position_us)
         # Output future completion means the thread has returned after restoration/disposal.
@@ -120,14 +126,26 @@ class Service:
                           'lease_expired' if self.expired else 'stopped' if self.cancelled.is_set() else 'completed',
                           observed_local_us=str(self.now()), audio_position_us=None if self.engine.audio_position_us is None
                           else str(self.engine.audio_position_us))
+            self.record_completed_activity(result)
             if failure != 'unknown_outcome':
                 self.worker_future = self.worker = self.cancelled = self.worker_deadline = None
                 self.worker_timed_out = False
             # Unknown cleanup deliberately retains this worker and claim forever.
+        if self.disarm_result is not None and not self.prepared and self.quiet_without_tick():
+            self.disarm_result.update(phase='settled', settlement='settled', terminal_reason='stopped', failure=None)
+
+    def quiet_without_tick(self):
+        return self.worker_future is None and self.ordinary is None and self.cleanup_task is None
+
+    def record_completed_activity(self, result):
+        activity = result.get('activity')
+        if (activity is not None and result['settlement'] == 'settled'
+                and int(activity['activation_generation']) == self.activation_high):
+            self.completed_repeat = max(self.completed_repeat, int(activity['root_repeat_index']))
 
     def quiet(self):
         self.tick()
-        return self.worker_future is None and self.ordinary is None
+        return self.quiet_without_tick()
 
     def check_boot(self, boot):
         if boot != self.boot:
@@ -192,7 +210,7 @@ class Service:
         self.renewal_lease = self.lease(request['time_probe'], self.now())
         return copy.deepcopy(self.renewal_lease)
 
-    def close(self, request):
+    async def close(self, request):
         # Expired authority may release only its own proven-quiet resources.
         if request['session'] != self.session or request['lease_token'] != self.lease_token:
             raise Refusal('stale_owner', 409)
@@ -201,19 +219,22 @@ class Service:
         response = {'session': self.session}
         # A partially closed set must never become eligible for playback again.
         self.retired = True
-        try:
-            for entry in self.prepared.values():
-                entry.close()
-        except Exception:
-            raise Refusal('unknown_outcome', 503) from None
-        self.prepared.clear()
-        self.store.pins.clear()
+        self.tick()  # Retiring schedules the same tracked owner used by Disarm.
+        cleanup = self.cleanup_task
+        if cleanup is not None:
+            await asyncio.shield(cleanup)
+            if self.cleanup_task is not None:
+                raise Refusal('unknown_outcome', 503)
+        if self.session != response['session']:
+            return response  # Another concurrent Close already released this session.
         self.session = self.owner = self.open_request = self.open_lease = self.lease_token = None
         self.expired = self.retired = False
         self.high = self.renewal_high = 0
         self.mapping = self.latest_activity = self.latest_result = self.stop_receipt = None
         self.receipts.clear()
-        self.tombstones.clear()
+        self.activation_high = self.retired_activation_high = 0
+        self.admitted_repeat = self.completed_repeat = -1
+        self.disarm_result = None
         return response
 
     def receipt(self, authority, request, kind):
@@ -240,7 +261,7 @@ class Service:
                   'failure': None, 'clock_use': 'no_clock', 'observed_local_us': str(self.now()),
                   'audio_position_us': None}
         payload = (kind, copy.deepcopy(request))
-        if kind == 'stop':
+        if kind in ('stop', 'disarm'):
             self.stop_receipt = (rev, payload, result)
         else:
             self.receipts[rev] = (payload, result)
@@ -264,9 +285,13 @@ class Service:
         if self.retired:
             raise Refusal('owner_retired', 409)
         self.ordinary_available()
-        config = {k: request[k] for k in ('content', 'expected_facts', 'resume_auto', 'local_output_delay_us')}
-        if len(self.prepared) >= 8 and not any(item.config == config for item in self.prepared.values()):
+        config = {k: request[k] for k in ('content', 'expected_facts', 'local_output_delay_us')}
+        if (not self.quiet() or self.prepared) and not any(item.config == config for item in self.prepared.values()):
             raise Refusal('capacity', 429)
+        content = request['content']
+        owner = authority['owner']
+        if any(content[k] != owner[k] for k in ('preparation_id', 'ready_set_revision', 'device_id')):
+            raise Refusal('identity_conflict', 409)
         result = self.admit(authority, request, 'prepare')
         self.ordinary = result
         self.control_task = asyncio.create_task(self.do_prepare(request, result))
@@ -276,11 +301,21 @@ class Service:
         return inspect(self.store.read(identity))
 
     def build_prepared(self, request, reserved):
-        bundle = self.inspect_bundle(request['content']['identity'])
+        remaining = PREPARED_BYTES - reserved
+        identity = request['content']['identity']
+        if int(identity['length']) + MANIFEST_PARSE_BYTES > remaining:
+            raise Refusal('capacity', 429)
+        bundle = inspect_program(self.store.read(identity, PROGRAM_BYTES),
+                                 request['local_output_delay_us'], remaining)
+        if any(use['role_id'] not in request['authority']['owner']['role_ids'] for use in bundle.manifest['uses']):
+            raise Refusal('identity_conflict', 409)
         if bundle.facts != request['expected_facts']:
             raise Refusal('extent_mismatch', 422)
+        if (bundle.facts['audio'] is not None and bundle.facts['audio']['encoding']
+                not in getattr(self.ports, 'native_encodings', ('pcm_s16_le',))):
+            raise Refusal('unsupported_media', 422)
         # Both immutable bundle storage and the retained decoder file are charged.
-        if reserved + bundle.reservation + len(bundle.audio) > 268435456:
+        if reserved + bundle.reservation + len(bundle.audio) > PREPARED_BYTES:
             raise Refusal('capacity', 429)
         audio = self.ports.prepare_audio(bundle.audio) if bundle.audio else None
         return bundle, audio
@@ -290,7 +325,7 @@ class Service:
         audio = None
         future = None
         try:
-            config = {k: request[k] for k in ('content', 'expected_facts', 'resume_auto', 'local_output_delay_us')}
+            config = {k: request[k] for k in ('content', 'expected_facts', 'local_output_delay_us')}
             existing = next((item for item in self.prepared.values() if item.config == config), None)
             if existing is None:
                 future = loop.run_in_executor(self.inspector, self.build_prepared, request,
@@ -312,12 +347,13 @@ class Service:
             if existing:
                 prepared = existing.metadata
             else:
-                delay = max(0, request['local_output_delay_us'])
-                physical = max(int(bundle.facts['audio_extent_us']),
-                               int(bundle.facts['movement_extent_us']) + delay if bundle.frames else 0)
+                physical = int(bundle.facts['duration_us'])
+                if bundle.facts['audio'] is not None:
+                    facts = bundle.facts['audio']
+                    physical = max(physical, (int(facts['frames']) * 1000000 + facts['sample_rate'] - 1) // facts['sample_rate'])
                 prepared = {'handle_id': uid(), 'session': self.session, 'owner': self.owner,
                             'content': request['content'], 'facts': bundle.facts,
-                            'resume_auto': request['resume_auto'], 'local_output_delay_us': request['local_output_delay_us'],
+                            'local_output_delay_us': request['local_output_delay_us'],
                             'physical_occupancy_us': str(physical)}
                 self.prepared[prepared['handle_id']] = PreparedEntry(prepared, bundle, config, audio)
                 audio = None
@@ -330,7 +366,8 @@ class Service:
         finally:
             if audio is not None:
                 try:
-                    audio.close()
+                    cleanup = loop.run_in_executor(self.output, self.release_native, (audio,))
+                    await asyncio.shield(cleanup)
                 except Exception:
                     self.provisional_audio = audio
                     result.update(phase='unknown', settlement='unknown', failure='unknown_outcome', terminal_reason='failed')
@@ -345,24 +382,38 @@ class Service:
             return self.result_status(old)
         if self.retired:
             raise Refusal('owner_retired', 409)
-        if activity['owner'] != authority['owner'] or activity['role_id'] not in activity['owner']['role_ids']:
+        if activity['owner'] != authority['owner'] or activity['cue_command']['process_epoch'] != authority['owner']['coordinator_epoch']:
             raise Refusal('identity_conflict', 409)
         item = self.prepared.get(request['prepared_handle_id'])
         if item is None or item.metadata['owner'] != authority['owner'] or item.metadata['session'] != self.session:
             raise Refusal('stale_owner', 409)
         if item.metadata['local_output_delay_us'] != request['local_output_delay_us']:
             raise Refusal('identity_conflict', 409)
+        if activity['play_id'] != item.metadata['content']['play_id']:
+            raise Refusal('identity_conflict', 409)
+        generation, repeat = int(activity['activation_generation']), int(activity['root_repeat_index'])
+        if generation <= self.retired_activation_high or generation < self.activation_high:
+            raise Refusal('wrong_activity', 409)
+        if generation == self.activation_high:
+            if (self.latest_activity is None
+                    or activation_identity(activity) != activation_identity(self.latest_activity)
+                    or repeat <= self.admitted_repeat
+                    or int(activity['cancellation_generation']) < int(self.latest_activity['cancellation_generation'])):
+                raise Refusal('identity_conflict', 409)
+        elif self.worker_future is not None:
+            raise Refusal('prior_worker_unsettled', 409)
         at = request['at']
         if at and at['epoch'] != self.open_request['coordinator_epoch']:
             raise Refusal('timebase_epoch_mismatch', 409)
-        key = canonical(activity)
-        if key in self.tombstones:
-            raise Refusal('identity_conflict', 409)
-        if len(self.tombstones) >= 4096:
-            raise Refusal('capacity', 429)
         self.ordinary_available()
         result = self.admit(authority, request, 'start', activity)
-        self.tombstones.add(key)
+        if generation > self.activation_high:
+            # A higher lease is admitted only after the previous native worker joined.
+            # It permanently fences every older lease without retaining UUID sets.
+            self.retired_activation_high = generation - 1
+            self.activation_high = generation
+            self.completed_repeat = -1
+        self.admitted_repeat = repeat
         self.latest_activity = copy.deepcopy(activity)
         self.ordinary = result
         target = self.now()
@@ -378,7 +429,8 @@ class Service:
     async def do_start(self, request, result, item, target):
         try:
             while True:
-                if self.retired:
+                if (self.retired or int(request['activity']['activation_generation'])
+                        <= self.retired_activation_high):
                     result.update(phase='settled', settlement='settled', terminal_reason='lease_expired' if self.expired else 'stopped')
                     return
                 self.check_session(request['authority'])
@@ -405,12 +457,13 @@ class Service:
                     raise Refusal('late', 422)
             self.worker_future = loop.run_in_executor(
                 self.output, self.engine.run, item.bundle, item.audio, cancelled,
-                request['local_output_delay_us'], item.metadata['resume_auto'], False, started, fence, target)
+                started, fence, target)
         except asyncio.CancelledError:
             result.update(phase='settled', settlement='settled', terminal_reason='lease_expired' if self.expired else 'stopped')
         except Refusal as error:
             result.update(phase='settled', settlement='settled', terminal_reason='failed', failure=error.reason)
         finally:
+            self.record_completed_activity(result)
             self.ordinary = self.control_task = None
 
     def mark_running(self, result, physical):
@@ -426,15 +479,24 @@ class Service:
         if old:
             self.update_stop(old)
             return self.result_status(old)
-        if activity['owner'] != authority['owner'] or activity['role_id'] not in activity['owner']['role_ids']:
+        if activity['owner'] != authority['owner'] or activity['cue_command']['process_epoch'] != authority['owner']['coordinator_epoch']:
             raise Refusal('identity_conflict', 409)
-        if self.latest_activity is not None and activity != self.latest_activity:
-            raise Refusal('wrong_activity', 409)
-        # No prepared owner has ever been captured: no authority to retire output.
         if self.owner is None:
             raise Refusal('stale_owner', 409)
+        generation = int(activity['activation_generation'])
+        if generation < self.activation_high:
+            raise Refusal('wrong_activity', 409)
+        if generation == self.activation_high:
+            if (self.latest_activity is None
+                    or activation_identity(activity) != activation_identity(self.latest_activity)):
+                raise Refusal('wrong_activity', 409)
+        elif self.worker_future is not None or (self.ordinary is not None
+                                               and self.ordinary.get('activity') is not None):
+            raise Refusal('prior_worker_unsettled', 409)
         result = self.admit(authority, request, 'stop', activity)
-        self.retired = True
+        self.activation_high = generation
+        self.retired_activation_high = generation
+        self.latest_activity = copy.deepcopy(activity)
         result['phase'] = 'stopping'
         if self.cancelled:
             self.cancelled.set()
@@ -443,10 +505,47 @@ class Service:
         return self.result_status(result)
 
     def update_stop(self, result):
-        if self.quiet():
+        if self.quiet() and (result is not self.disarm_result or not self.prepared):
             result.update(phase='settled', settlement='settled', terminal_reason='stopped', failure=None, observed_local_us=str(self.now()))
         elif self.now() - int(result['observed_local_us']) >= 5000000:
             result.update(phase='unknown', settlement='unknown', failure='unknown_outcome')
+
+    def disarm(self, request):
+        authority = request['authority']
+        old = self.receipt(authority, request, 'disarm')
+        if old:
+            return self.result_status(old)
+        result = self.admit(authority, request, 'disarm')
+        self.retired = True
+        self.disarm_result = result
+        result['phase'] = 'stopping'
+        if self.cancelled:
+            self.cancelled.set()
+        self.tick()
+        if not self.prepared and self.quiet():
+            result.update(phase='settled', settlement='settled', terminal_reason='stopped')
+        return self.result_status(result)
+
+    def release_native(self, resources):
+        self.ports.dispose()
+        for resource in resources:
+            resource.close()
+
+    async def dispose_preparation(self):
+        result = self.disarm_result
+        try:
+            # A native cleanup call remains charged until the executor actually joins.
+            await asyncio.get_running_loop().run_in_executor(
+                self.output, self.release_native, tuple(self.prepared.values()))
+            self.prepared.clear()
+            self.store.pins.clear()
+            if result:
+                result.update(phase='settled', settlement='settled', terminal_reason='stopped', failure=None)
+            self.cleanup_task = self.cleanup_started = None
+        except Exception:
+            if result:
+                result.update(phase='unknown', settlement='unknown', failure='unknown_outcome')
+            # Keep the failed task as ownership debt; Close cannot claim quiet.
 
     def lookup(self, request):
         self.tick()
@@ -466,12 +565,14 @@ class Service:
     def capabilities(self):
         return {'protocol_version': 1, 'device_boot_id': self.boot, 'source_revision': self.source_revision,
                 'build_sha256': self.build_sha256, 'eyes': True, 'mouth': True, 'resume_auto': True,
-                'pcm_wav': True, 'float_wav': True, 'audio_less': True, 'scheduled_start': True,
+                'pcm_wav': 'pcm_s16_le' in getattr(self.ports, 'native_encodings', ('pcm_s16_le',)),
+                'float_wav': 'float32_le' in getattr(self.ports, 'native_encodings', ('pcm_s16_le',)),
+                'audio_less': True, 'scheduled_start': True,
                 'long_play_rate_following': False, 'audio_ready': self.ports.ready,
                 'audio_path': {'sink_name': self.ports.sink_name, 'sample_rate': '48000', 'channels': '2'},
-                'capacities': {'sessions': '1', 'workers': '1', 'ordinary_jobs': '1', 'prepared_handles': '8',
-                               'receipts': '64', 'start_tombstones': '4096', 'bundle_bytes': '67108864',
-                               'store_bytes': '1073741824', 'prepared_bytes': '268435456'},
+                'capacities': {'sessions': '1', 'workers': '1', 'ordinary_jobs': '1', 'prepared_handles': '1',
+                               'receipts': '64', 'bundle_bytes': '67108864', 'program_bytes': str(PROGRAM_BYTES),
+                               'store_bytes': '1073741824', 'prepared_bytes': str(PREPARED_BYTES)},
                 'start_action_time_us': None, 'restoration_action_time_us': None}
 
     async def dispatch(self, method, path, request):
@@ -486,6 +587,7 @@ class Service:
             head + '/prepare': ('POST', 'prepare', self.prepare),
             head + '/start': ('POST', 'start', self.start),
             head + '/stop': ('POST', 'stop', self.stop),
+            head + '/disarm': ('POST', 'disarm', self.disarm),
             head + '/operations/lookup': ('POST', 'query', self.lookup),
         }
         if path == head + '/status':
@@ -524,9 +626,9 @@ class Service:
             if schema == 'open' and type(request) is dict and type(request.get('protocol_version')) is int and request['protocol_version'] != 1:
                 raise Refusal('unsupported_protocol', 422)
             validate(schema, request)
-            if schema == 'prepare':
-                validate_facts(request['expected_facts'])
         result = handler(request)
+        if asyncio.iscoroutine(result):
+            result = await result
         return result if isinstance(result, tuple) else (200, result)
 
     async def disk_call(self, function, *args):
@@ -582,6 +684,14 @@ class Service:
                 if outcome == 'unknown_outcome':
                     return False
             except asyncio.TimeoutError:
+                return False
+        if self.cleanup_task is not None:
+            cleanup = self.cleanup_task
+            try:
+                await asyncio.wait_for(asyncio.shield(cleanup), 5)
+            except asyncio.TimeoutError:
+                return False
+            if self.cleanup_task is not None:
                 return False
         if self.disk_pending or self.ordinary is not None:
             return False

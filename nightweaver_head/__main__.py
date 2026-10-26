@@ -69,7 +69,7 @@ async def serve(config):
     secret = private_file(config['secret_file']).decode('utf-8').strip()
     os.environ['PULSE_SERVER'] = 'tcp:192.168.2.235:4713'
     os.environ['PULSE_SINK'] = config['sink_name']
-    ports = PygamePorts(config['sink_name'])
+    ports = PygamePorts(config['sink_name'], route_check=lambda: check_route(config))
     ports.initialize()
     service = Service(config['content_root'], ports, source_revision=config['source_revision'], build_sha256=build_hash())
     service.store.index_local(config['local_library_root'])
