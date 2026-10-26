@@ -35,7 +35,8 @@ def program_reservation(manifest, archive_bytes, audio_bytes, event_bytes,
     # Python object/storage overhead on the supported 32/64-bit runtimes.
     count = int(manifest['event_count'])
     objects = 2 * object_bytes(manifest) + count * 3072 + 65536
-    # splitlines retains byte objects while decoded events are accumulated.
+    # Constant-space preflight and one <=4096-byte line copy replace splitlines.
+    # Retain conservative raw/decode scratch and per-event bookkeeping coverage.
     parsing = archive_bytes + audio_bytes + 2 * event_bytes + count * 64 + objects
     retained = 2 * audio_bytes + objects
     if max(archive_bytes + MANIFEST_PARSE_BYTES, parsing, retained) > available_bytes:

@@ -4,6 +4,7 @@ import json
 import struct
 import tempfile
 import threading
+import tracemalloc
 import unittest
 import zipfile
 from pathlib import Path
@@ -25,6 +26,96 @@ class ProgramTests(unittest.TestCase):
             events = [json.loads(line) for line in archive.read('events.jsonl').splitlines()]
         change(manifest, events)
         return archive_program(manifest, events)
+
+    def test_event_line_preflight_bounds_and_delimiters(self):
+        from nightweaver_head.program import event_lines
+        for raw in (b'a', b'a\n', b'a\r', b'a\r\n', b'a\rb\nc\r\nd',
+                    b'\n', b'\r\n', b'x' * 4096):
+            expected = raw.splitlines()
+            self.assertEqual(list(event_lines(raw, len(expected))), expected)
+        for raw, count in ((b'', 0), (b'a\nb', 1), (b'a', 2), (b'x' * 4097, 1),
+                           (b'x' * 4097 + b'\n', 1)):
+            with self.subTest(raw=raw[:10], count=count), self.assertRaises(Refusal):
+                next(event_lines(raw, count))
+        # No first line is exposed for decoding before the complete shape passes.
+        with self.assertRaises(Refusal):
+            next(event_lines(b'valid\n' + b'\n' * 100001, 2))
+
+    def test_malicious_physical_lines_have_bounded_actual_peak(self):
+        with zipfile.ZipFile(io.BytesIO(program())) as original:
+            manifest = original.read('manifest.json')
+        for size, budget in ((8 * 1024 * 1024, 32 * 1024 * 1024),
+                             (32 * 1024 * 1024, 256 * 1024 * 1024)):
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_STORED) as archive:
+                archive.writestr('manifest.json', manifest)
+                archive.writestr('events.jsonl', b'\n' * size)
+            data = stream.getvalue()
+            tracemalloc.start()
+            try:
+                with self.assertRaisesRegex(Refusal, 'unsupported_media'):
+                    inspect_program(data, available_bytes=budget)
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            # Archive exists before tracing. Charge it too, matching reservation.
+            self.assertLess(len(data) + peak, budget)
+            self.assertLess(peak, size + 2 * 1024 * 1024)
+
+    def test_deflate_ratio_and_valid_line_boundaries(self):
+        with zipfile.ZipFile(io.BytesIO(program())) as archive:
+            manifest = archive.read('manifest.json')
+            lines = archive.read('events.jsonl').splitlines()
+        for delimiter in (b'\n', b'\r', b'\r\n'):
+            for trailing in (False, True):
+                for width in (4096, 4097):
+                    payload = delimiter.join(line + b' ' * (width - len(line)) for line in lines)
+                    if trailing:
+                        payload += delimiter
+                    stream = io.BytesIO()
+                    with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED) as archive:
+                        archive.writestr('manifest.json', manifest)
+                        archive.writestr('events.jsonl', payload)
+                    if width == 4096:
+                        self.assertEqual(len(inspect_program(stream.getvalue()).events), len(lines))
+                    else:
+                        with self.assertRaises(Refusal):
+                            inspect_program(stream.getvalue())
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('manifest.json', manifest)
+            archive.writestr('events.jsonl', b'\n' * (8 * 1024 * 1024))
+        observed = []
+        original = zipfile.ZipFile.read
+        def read(archive, name, *args, **kwargs):
+            observed.append(name)
+            return original(archive, name, *args, **kwargs)
+        with patch.object(zipfile.ZipFile, 'read', read), self.assertRaises(Refusal):
+            inspect_program(stream.getvalue())
+        self.assertEqual(observed, [])
+
+    def test_origin_begin_precedes_native_play_without_reselection(self):
+        ports, clock = Ports(), FakeClock()
+        parsed = inspect_program(program(audio=wav(frames=288, rate=48000)))
+        ports.positions = [0, 1000, 6000]
+        self.assertIsNone(ProgramPlayer(ports, clock).run(parsed, object(), threading.Event()))
+        self.assertLess(ports.events.index(('auto', False)), ports.events.index(('play',)))
+        self.assertFalse(any(event[0] == 'load' for event in ports.events))
+
+    def test_leading_silence_keeps_idle_until_authored_begin(self):
+        with zipfile.ZipFile(io.BytesIO(program(audio=wav(frames=288, rate=48000)))) as archive:
+            manifest = json.loads(archive.read('manifest.json'))
+            events = [json.loads(line) for line in archive.read('events.jsonl').splitlines()]
+            audio = archive.read('audio.dat')
+        manifest['uses'][0].update(start=time_at(500), audio_start_frame='24', end=time_at(2500))
+        for event, at in zip(events[:3], (500, 1500, 2500)):
+            event['at'] = time_at(at)
+        parsed = inspect_program(archive_program(manifest, events, audio))
+        ports, clock = Ports(), FakeClock()
+        ports.positions = [0, 500, 1500, 6000]
+        self.assertIsNone(ProgramPlayer(ports, clock).run(parsed, object(), threading.Event()))
+        self.assertLess(ports.events.index(('play',)), ports.events.index(('auto', False)))
+        self.assertEqual(sum(event[0] == 'play' for event in ports.events), 1)
 
     def test_declared_peak_budget_refuses_before_expanding_events_or_audio(self):
         data = self.mutate(lambda manifest, _: manifest.update(event_count='100000'))
@@ -115,37 +206,72 @@ class ProgramTests(unittest.TestCase):
         with self.assertRaises(Refusal):
             inspect_program(self.mutate(duplicate))
 
-    def test_pcm_and_float_native_gap_and_tail_silence(self):
-        import struct
-        for encoding, width in ((1, 2), (3, 4)):
-            for channels in (1, 2):
-                silent = bytearray(48 * channels * width)
-                # Nonzero source data is authored; all source and gap boundaries
-                # are complete native frames, independent of encoding/channel count.
-                source = struct.pack('<h' if encoding == 1 else '<f', 1)
-                silent[:width] = source
-                data = program(audio=wav(frames=48, channels=channels, encoding=encoding, samples=bytes(silent)))
-                inspect_program(data)
-                for frame in (8, 16, 23, 32, 47):
-                    with self.subTest(encoding=encoding, channels=channels, frame=frame):
-                        samples = bytearray(silent)
-                        samples[frame * channels * width:frame * channels * width + width] = source
-                        with self.assertRaises(Refusal):
-                            inspect_program(program(audio=wav(frames=48, channels=channels, encoding=encoding, samples=bytes(samples))))
-                if encoding == 3:
-                    for sample in (-0.0, float('inf'), float('nan')):
-                        samples = bytearray(silent)
-                        samples[16 * channels * width:16 * channels * width + width] = struct.pack('<f', sample)
-                        with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                            manifest = json.loads(archive.read('manifest.json'))
-                            events = [json.loads(line) for line in archive.read('events.jsonl').splitlines()]
-                        data = archive_program(manifest, events, wav(frames=48, channels=channels,
-                            encoding=encoding, samples=bytes(samples)))
-                        if sample == 0.0:
-                            inspect_program(data)
-                        else:
-                            with self.assertRaises(Refusal):
-                                inspect_program(data)
+    def test_native_pcm_gap_and_tail_silence(self):
+        for channels in (1, 2):
+            silent = bytearray(288 * channels * 2)
+            silent[:2] = struct.pack('<h', 1)
+            data = program(audio=wav(frames=288, rate=48000, channels=channels,
+                                     samples=bytes(silent)))
+            inspect_program(data)
+            for frame in (48, 80, 143, 192, 287):
+                with self.subTest(channels=channels, frame=frame):
+                    samples = bytearray(silent)
+                    samples[frame * channels * 2:frame * channels * 2 + 2] = struct.pack('<h', 1)
+                    with self.assertRaises(Refusal):
+                        inspect_program(program(audio=wav(frames=288, rate=48000,
+                            channels=channels, samples=bytes(samples))))
+
+    def normalized_program(self, rate=44100, frames=1, start=0, end=23,
+                           native_frames=None, channels=2):
+        with zipfile.ZipFile(io.BytesIO(program())) as archive:
+            manifest = json.loads(archive.read('manifest.json'))
+        use = manifest['uses'][0]
+        count = (frames * 48000 + rate - 1) // rate
+        use.update(start=time_at(start), end=time_at(end), source_movement_extent_us='0',
+                   source_audio={'encoding': 'float32_le', 'frames': str(frames),
+                                 'sample_rate': rate, 'channels': 1},
+                   native_audio_frames=str(count if native_frames is None else native_frames),
+                   audio_start_frame=str((start * 48000 + 999999) // 1000000))
+        total = max((end * 48000 + 999999) // 1000000, int(use['audio_start_frame']) + count)
+        audio = wav(frames=total, rate=48000, channels=channels)
+        from nightweaver_head.bundle import wav_facts
+        manifest.update(uses=[use], duration_us=str(end), event_count='2', audio=wav_facts(audio)[0])
+        events = [{'at': time_at(at), 'use_id': '0', 'event': {'kind': kind}}
+                  for at, kind in ((start, 'begin'), (end, 'end'))]
+        return manifest, events, audio
+
+    def test_normalized_source_exact_extent_and_native_ceil_tail(self):
+        for rate, frames, end in ((44100, 1, 23), (192000, 1, 6), (8000, 1, 125)):
+            manifest, events, audio = self.normalized_program(rate, frames, end=end)
+            parsed = inspect_program(archive_program(manifest, events, audio))
+            self.assertEqual(parsed.manifest['uses'][0]['source_audio']['sample_rate'], rate)
+            self.assertEqual(parsed.manifest['uses'][0]['native_audio_frames'],
+                             str((frames * 48000 + rate - 1) // rate))
+        for change in (lambda m: m['uses'][0].update(native_audio_frames='1'),
+                       lambda m: m['uses'][0]['source_audio'].update(frames='2'),
+                       lambda m: m['uses'][0].update(audio_start_frame='1'),
+                       lambda m: m['uses'][0].pop('source_content')):
+            manifest, events, audio = self.normalized_program()
+            change(manifest)
+            with self.assertRaises(Refusal):
+                inspect_program(archive_program(manifest, events, audio))
+        manifest, events, audio = self.normalized_program(channels=1)
+        with self.assertRaises(Refusal):
+            inspect_program(archive_program(manifest, events, audio))
+
+    def test_quantized_native_spans_cannot_collide(self):
+        manifest, events, _ = self.normalized_program(start=1, end=24)
+        later = copy.deepcopy(manifest['uses'][0])
+        later.update(id='1', occurrence={'use_id': uid(), 'path': []},
+                     start=time_at(24), end=time_at(47), audio_start_frame='2')
+        manifest.update(uses=[manifest['uses'][0], later], duration_us='47', event_count='4')
+        events.extend({'at': time_at(at), 'use_id': '1', 'event': {'kind': kind}}
+                      for at, kind in ((24, 'begin'), (47, 'end')))
+        audio = wav(frames=4, rate=48000, channels=2)
+        from nightweaver_head.bundle import wav_facts
+        manifest['audio'] = wav_facts(audio)[0]
+        with self.assertRaises(Refusal):
+            inspect_program(archive_program(manifest, events, audio))
 
     def test_archive_paths_duplicates_and_missing_audio(self):
         for name in ('../escape', '/tmp/escape', 'animation.csv', 'manifest.json'):
@@ -158,11 +284,13 @@ class ProgramTests(unittest.TestCase):
             inspect_program(self.mutate(lambda m, e: m.update(audio={
                 'encoding': 'pcm_s16_le', 'frames': '8', 'sample_rate': 8000, 'channels': 1})))
 
-    def test_native_formats_and_audio_less_have_distinct_facts(self):
-        for encoding in (1, 3):
-            parsed = inspect_program(program(audio=wav(frames=48, encoding=encoding)))
-            self.assertEqual(parsed.facts['audio']['frames'], '48')
+    def test_generated_audio_is_native_pcm48k_and_sources_keep_original_facts(self):
+        parsed = inspect_program(program(audio=wav(frames=288, rate=48000)))
+        self.assertEqual(parsed.facts['audio']['frames'], '288')
         self.assertIsNone(inspect_program(program()).facts['audio'])
+        for rate, encoding in ((8000, 1), (48000, 3)):
+            with self.assertRaises(Refusal):
+                inspect_program(program(audio=wav(frames=288, rate=rate, encoding=encoding)))
 
     def test_gaps_and_abutting_order_with_fractional_cursor(self):
         for gap in (0, 1000):
@@ -182,7 +310,7 @@ class ProgramTests(unittest.TestCase):
     def test_decoder_cursor_and_sentinel_final_events_once(self):
         ports, clock = Ports(), FakeClock()
         ports.positions = [0, 1000, -1]
-        parsed = inspect_program(program(audio=wav(frames=48)))
+        parsed = inspect_program(program(audio=wav(frames=288, rate=48000)))
         self.assertIsNone(ProgramPlayer(ports, clock).run(parsed, object(), threading.Event()))
         self.assertEqual(len([e for e in ports.events if e[0] == 'play']), 1)
         self.assertEqual(len([e for e in ports.events if e[0] == 'frame']), 2)
@@ -196,7 +324,7 @@ class ProgramTests(unittest.TestCase):
         route = Mock()
         ports = PygamePorts('synthetic', route_check=route)
         ports.pg, ports.ready, ports.sock = SimpleNamespace(mixer=mixer), True, Mock()
-        resource = ports.prepare_audio(wav(frames=48))
+        resource = ports.prepare_audio(wav(frames=288, rate=48000))
         try:
             self.assertEqual(music.load.call_count, 1)
             route.assert_called_once()
@@ -205,7 +333,7 @@ class ProgramTests(unittest.TestCase):
             ports.sock.sendto.assert_not_called()
             music.get_pos.side_effect = [0, 1, 6, 0, 1, 6]
             music.get_busy.return_value = False
-            parsed = inspect_program(program(audio=wav(frames=48)))
+            parsed = inspect_program(program(audio=wav(frames=288, rate=48000)))
             for _ in range(2):
                 self.assertIsNone(ProgramPlayer(ports, FakeClock()).run(parsed, resource, threading.Event()))
             self.assertEqual(music.load.call_count, 1)
@@ -375,6 +503,25 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             await self.start(prepared, forged)
         self.assertEqual(self.ports.events, before)
 
+    async def test_malicious_event_count_refuses_before_native_setup_or_ready(self):
+        facts = inspect_program(self.data).facts
+        with zipfile.ZipFile(io.BytesIO(self.data)) as original:
+            manifest = original.read('manifest.json')
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, 'w', zipfile.ZIP_STORED) as archive:
+            archive.writestr('manifest.json', manifest)
+            archive.writestr('events.jsonl', b'\n' * (8 * 1024 * 1024))
+        self.data = stream.getvalue()
+        self.content = program_content(self.data, self.owner)
+        Path(self.tmp.name, self.content['identity']['sha256']).write_bytes(self.data)
+        _, result = self.service.prepare({'authority': self.auth(), 'content': self.content,
+            'expected_facts': facts, 'local_output_delay_us': 250})
+        await until(lambda: self.service.ordinary is None)
+        self.assertEqual(self.service.lookup(result['operation'])['failure'], 'unsupported_media')
+        self.assertFalse(self.service.prepared)
+        self.assertFalse(self.ports.events)
+        self.assertFalse(self.ports.resources)
+
     async def test_wrong_facts_fail_before_native_selection(self):
         facts = inspect_program(self.data).facts
         facts['duration_us'] = '7'
@@ -389,11 +536,14 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unqualified_native_float_refuses_before_load(self):
         self.assertFalse(self.service.capabilities()['float_wav'])
-        self.data = program(self.owner['role_ids'][0], audio=wav(frames=48, encoding=3), delay=250)
+        self.data = program(self.owner['role_ids'][0], audio=wav(frames=288, rate=48000, encoding=3), delay=250)
         self.content = program_content(self.data, self.owner)
         Path(self.tmp.name, self.content['identity']['sha256']).write_bytes(self.data)
         _, result = self.service.prepare({'authority': self.auth(), 'content': self.content,
-            'expected_facts': inspect_program(self.data).facts, 'local_output_delay_us': 250})
+            'expected_facts': {'duration_us': '6000', 'audio': {'encoding': 'float32_le',
+                'frames': '288', 'sample_rate': 48000, 'channels': 1}, 'uses': '2',
+                'event_count': '6', 'has_eye_motion': False, 'has_mouth_motion': True},
+            'local_output_delay_us': 250})
         await until(lambda: self.service.ordinary is None)
         self.assertEqual(self.service.lookup(result['operation'])['failure'], 'unsupported_media')
         self.assertFalse(self.ports.events)
@@ -487,7 +637,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             await self.start(prepared, dict(repeated, root_repeat_index='2'))
 
     async def test_voice_prepare_loads_once_repeats_reuse_and_disarm_disposes(self):
-        self.data = program(self.owner['role_ids'][0], audio=wav(frames=48), delay=250)
+        self.data = program(self.owner['role_ids'][0], audio=wav(frames=288, rate=48000), delay=250)
         self.content = program_content(self.data, self.owner)
         Path(self.tmp.name, self.content['identity']['sha256']).write_bytes(self.data)
         prepared, _ = await self.prepare()
@@ -534,7 +684,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.service.prepared)
 
     async def test_disarm_pending_native_prepare_does_not_publish_ready(self):
-        self.data = program(self.owner['role_ids'][0], audio=wav(frames=48), delay=250)
+        self.data = program(self.owner['role_ids'][0], audio=wav(frames=288, rate=48000), delay=250)
         self.content = program_content(self.data, self.owner)
         Path(self.tmp.name, self.content['identity']['sha256']).write_bytes(self.data)
         gate = threading.Event()

@@ -53,6 +53,23 @@
         "channels"
       ]
     },
+    "ContentIdentity": {
+      "type": "object",
+      "properties": {
+        "length": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "length"
+      ]
+    },
     "Counter": {
       "type": "string",
       "maxLength": 19,
@@ -181,6 +198,26 @@
         "nightweaver_head_program_1"
       ]
     },
+    "ManagedContent": {
+      "type": "object",
+      "properties": {
+        "asset_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/ContentIdentity"
+        },
+        "version_id": {
+          "$ref": "#/$defs/NonNilUuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "version_id",
+        "identity"
+      ]
+    },
     "Manifest": {
       "type": "object",
       "properties": {
@@ -273,7 +310,6 @@
       "type": "object",
       "properties": {
         "audio_start_frame": {
-          "description": "PCM placement and complete source length in the manifest's native format.",
           "$ref": "#/$defs/Counter"
         },
         "end": {
@@ -281,6 +317,9 @@
         },
         "id": {
           "description": "Contiguous zero-based index in this immutable manifest.",
+          "$ref": "#/$defs/Counter"
+        },
+        "native_audio_frames": {
           "$ref": "#/$defs/Counter"
         },
         "occurrence": {
@@ -292,8 +331,19 @@
         "role_id": {
           "$ref": "#/$defs/NonNilUuid"
         },
-        "source_audio_frames": {
-          "$ref": "#/$defs/Counter"
+        "source_audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BundleAudioFacts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_content": {
+          "description": "Immutable original archive and decoded facts, distinct from generated PCM.",
+          "$ref": "#/$defs/ManagedContent"
         },
         "source_movement_extent_us": {
           "$ref": "#/$defs/Counter"
@@ -310,8 +360,10 @@
         "start",
         "end",
         "resume_auto",
+        "source_content",
+        "source_audio",
         "audio_start_frame",
-        "source_audio_frames",
+        "native_audio_frames",
         "source_movement_extent_us"
       ]
     },

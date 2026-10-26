@@ -58,8 +58,15 @@ Preparation accepts only a compiled program ZIP: `manifest.json`, `events.jsonl`
 and optional WAV `audio.dat`. It validates generated wire fields, exact rational
 coordinates, ordered role/occurrence/source identities, complete Begin/End pairs,
 source extents, native frame placement and finite archive/event/reservation bounds.
-No archive paths are extracted. PCM16/IEEEfloat32 WAV retains the explicit native
-sample rate and mono/stereo layout; malformed or mismatched audio fails preparation.
+No archive paths are extracted. Every use preserves original managed `source_content`
+identity and exact original `source_audio` facts. Generated `audio.dat` is PCM16/48000Hz:
+mono only when all voiced originals are mono PCM16/48000Hz, otherwise stereo.
+`native_audio_frames` replaces the former source-frame field and equals
+ceil(original frames * 48000 / original sample rate). Placement is ceil(exact root
+start * 48000 / 1000000). Exact original audio duration must fit the authored use;
+the separately derived native ceil tail may extend beyond it. Native spans must not
+overlap; file frames cover both authored end and every native span end. Malformed
+facts, cropped sources, mismatched counts/layout or nonzero gaps fail preparation.
 The separate `/inspect` route still ingests authored `.skelanim` source ZIP/CSV and
 returns import BundleFacts, not ProgramFacts or a runtime handle.
 
@@ -72,7 +79,9 @@ perform no load, temporary-file creation, process launch or new audio connection
 
 One continuous real decoder cursor drives every authored use and gap. Event coordinates
 already include captured motion delay; the endpoint does not apply it a second time.
-At a shared boundary the old final motion precedes old End, new Begin and new motion.
+A Begin at origin disables automatic modes before native Play. A leading silent gap
+starts the continuous file while retaining idle mode until its timed Begin. Later uses
+reuse the same decoder without reload. At a shared boundary the old final motion precedes old End, new Begin and new motion.
 End restores idle only for authored `resume_auto=true`, releasing blink holds with
 0x45 before automatic modes; false leaves the modes disabled through the gap.
 A terminal −1 cursor continues a bounded tail from the last real observation; ending
@@ -178,7 +187,7 @@ metadata and parsing peak charges checked before payload expansion. Raw authorin
 bundles retain their separate64MiB limit.
 Authored audio accepts PCM16 or finite float32, mono/stereo,8000..192000Hz.
 The SDL1.2 native endpoint advertises PCM16 only; Host Setup must normalize
-float32 before transfer. The local maintenance compiler likewise converts float32
+all supported source rates/formats before transfer. The local maintenance compiler likewise converts float32
 to clipped PCM16 during preparation, preserving rate and channel order.
 One common format is explicit in the immutable program; the endpoint does not convert
 heterogeneous source formats or invent managed versions for prepared bytes.
@@ -191,7 +200,8 @@ Stop/repeat/Disarm, stale activity rejection, held native preparation/restoratio
 disposal joins, expiry, unknown cleanup, reserved HTTP capacity and the real UDP eye
 consumer's0x45 release. Compileall and whitespace checks pass. Vendored control/content schemas follow the required play binding, activation
 generation and distinct program capacity in Nightweaver `e7c4150`; program schema
-remains frozen at `a8991e1`. These are author checks;
+uses the jointly updated normalized provenance contract (SHA256
+`b700e35afd8e5e2ce191f319af95aac175c049f6d33b77cac32a04796fe920cf`). These are author checks;
 independent review, cross-language integrated acceptance and installed native/physical
 qualification remain separate coordinator gates. No device output or deployment was
 performed for these tests.
@@ -203,7 +213,7 @@ pins and native ownership retained until actual join; failed disposal stays unkn
 Occurrence uniqueness compares role/use/path tuples independently of JSON object order.
 The WAV validator exposes its checked sample payload to the program parser, which
 verifies every native frame outside declared complete source spans is silence (PCM16
-zero bytes or finite float32 zero, including negative zero). Nonzero authored source
+zero bytes in the current generated PCM16 contract). Nonzero authored source
 samples remain valid. Regression tests hold Close disposal while real loopback HTTP
 status, renewal and reserved Stop respond; reordered nested identities and nonzero
 mono/stereo PCM/float gaps/tails are refused. The actual N449 Rust encoder's synthetic
@@ -223,3 +233,23 @@ paths for the installed older protocol.
 Final follow-up author validation:59 head tests pass on both Python3.9.25 and
 3.14.6, including queued-repeat cancellation and conservative event-memory sizing.
 Compileall passes on both; whitespace checks pass. No live devices were used.
+
+
+NIGHT-451 continuation (26 October): the historical pass3 parser blocker is fixed
+by a constant-state LF/CR/CRLF preflight before any event decoding or line copies.
+It bounds actual count and 4096-byte line lengths, then decodes one line at a time.
+Reservation conservatively retains archive + audio + twice raw event bytes +
+64 bytes/event scratch + twice measured manifest graph + 3072 bytes/event + 64KiB.
+There is no allocation proportional to undeclared physical line count. See the
+[current session](sessions/current.md) for actual peak measurements and checks.
+The user explicitly removed the review cap for this continuation; prior findings
+and review history remain, with the next independent review numbered pass4.
+This does not itself establish review clearance or publication/deployment.
+
+The native adapter still owns one pygame music selection and one retained program.
+The canonical rehearsal's background play has no head contribution. Simultaneous
+independently selected background/main head programs are not demonstrated by this
+adapter; the coordinator owns that separate capability decision. No native timing,
+installed Python3.9.2/pygame1.9.6/SDL1.2 or physical output acceptance is inferred
+from the software checks. The local maintenance compiler creates only internal
+Program metadata, never a managed HTTP archive with invented asset identity.

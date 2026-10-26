@@ -102,7 +102,7 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         import threading
         from pathlib import Path
         opened_request, lease, owner = opened(self.service)
-        data = program(owner['role_ids'][0], audio=wav(frames=48))
+        data = program(owner['role_ids'][0], audio=wav(frames=288, rate=48000))
         ref = program_content(data, owner)
         Path(self.tmp.name, ref['identity']['sha256']).write_bytes(data)
         self.service.prepare({'authority': authority(lease, owner, 1), 'content': ref,

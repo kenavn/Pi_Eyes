@@ -1,31 +1,44 @@
-# Current software session — 2026-10-25
+# Current software session — 2026-10-26
 
-NIGHT-421, source baseline338627b8b5c01adc258556cce238cb78afcb0112.
-Implemented prepared HTTP/control/content service and one interruptible playback engine.
-Removed superseded MQTT owner/callers/deployment references. Kept the editor format and
-all eye/mouth/boot/display/pigpio/backlight/calibration implementations unchanged.
-Runtime/install handoff: [head-http.md](../head-http.md). Frozen schemas retain exact
-Nightweaver2c20956a1f9790d904a3ec5ea68fa12e90574650 provenance.
+NIGHT-451 continuation from8d72370d875aeb6a00487e90b74a27427ec5e199.
+Replaced unbounded splitlines with constant-space physical-record preflight and
+one-line decoding. Enforced actual count/4096-byte bounds before event decoding,
+including LF/CR/CRLF and terminal delimiter semantics. Begin at time zero now
+precedes native Play; a leading silence preserves idle until timed Begin. The
+continuous selection is retained across uses, repeats and stops.
 
-Author validation:40 synthetic/fake-port/owned-loopback unittest cases passed on
-Python3.9.25 and3.14.4 with hash-pinned h11 0.16.0; compileall and git diff whitespace
-checks passed. Independent source review pass1/3 found two blockers: unclassified header ingress could
-occupy reserved capacity, and a published duplicate upload could clear another job
-reservation. Both are corrected with finite-burst loopback and exact A/B/C replay
-regressions. Pass2/3 cleared both product fixes and required timer-controlled admission
-coverage. The regression now injects header timer callbacks and a fake service clock,
-proves dispatch before explicitly delivered expiry, then drives timeout/cleanup directly.
-Pass3/3 and remote CI/landing remain coordinator gates; the count does not reset.
-A one-off read-only inspection of privately captured hode1/hode2 archives matched
-independent Rust facts: audio81251834/79668105us, movement81245001/79639506us,
-8133/7934 movement rows. Those archives are not committed or required by tests.
+Updated the one HTTP program contract with required original source_content and
+source_audio, and native_audio_frames replacing source_audio_frames. Parser checks
+exact original duration separately from generated48k PCM16 ceil spans, channel
+policy, complete file count, span collisions and silent gaps. Shared generated schema
+SHA256 b700e35afd8e5e2ce191f319af95aac175c049f6d33b77cac32a04796fe920cf.
+Local authoring remains internal Program construction without fabricated catalogue
+identity; it does not produce valid managed HTTP manifests.
 
-No deployment, target SSH, real pygame/audio initialization or playback was performed.
-Actual Python3.9.2/pygame1.9.6 target audio loading, Show network/firewall/sink readiness,
-physical sound/movement and operator acceptance remain unqualified. The service never
-claims physical quiet or speaker drain. No automatic process-failure restart, media
-fallback, long-play rate following, MP3, pause or seek is supplied.
+Author checks: full head suite67 tests on Python3.9.25 and3.14.6, compileall both,
+shared schema equality and diff whitespace. The unmodified external
+NIGHT-456 OrderingTests.test_initial_begin_precedes_first_play passes when imported
+directly against this lane on3.9.25 (only this normative test; exact-clean-source
+wrapper and full cross-language rehearsal await its owner’s pin/manifest update). No native/house devices or deployment.
+Actual tracemalloc inspection peak (archive allocated before tracing):
 
-Next: independent bounded source review of this coherent branch; coordinator publishes
-only after blockers clear, then verifies exact-head CI before merging. Final deployment
-unit/config/credential rendering belongs to the separately scoped infrastructure work.
+| Runtime | Newline payload | Archive bytes | New peak bytes | Archive + peak | Budget |
+| --- | ---: | ---: | ---: | ---: | ---: |
+|3.9.25|8388608|8390229|8447482|16837711|33554432|
+|3.9.25|33554432|33556053|33567891|67123944|268435456|
+|3.14.6|8388608|8390229|8427630|16817859|33554432|
+|3.14.6|33554432|33556053|33561631|67117684|268435456|
+
+All cases refused unsupported_media. Regression checks charge archive+measured
+peak, enforce a small fixed margin above raw payload, validate line semantics and
+deflate ratio refusal, and prove malformed input never selects native audio or
+publishes Prepared. Historical pass3 remains recorded; user's explicit removal of
+caps permits continuation, with next independent review pass4, not a reset.
+
+Next: coordinator assigns independent review of this coherent change and updates
+external Rust/Python rehearsal to this exact clean source and provenance contract.
+Then verify normative origin Begin ordering and actual Rust normalized archives.
+The one pygame music selection does not demonstrate general simultaneous BG/main
+head contributions; canonical show background currently has no head use. Native
+armhf Python3.9.2/pygame1.9.6/SDL1.2, physical timing/output, CI/main landing and
+separately authorized deployment remain unclaimed.

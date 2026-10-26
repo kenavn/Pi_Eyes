@@ -12,6 +12,46 @@ from .program_limits import (PROGRAM_BYTES, EXPANDED_PROGRAM_BYTES, PREPARED_BYT
 from .wire import decode, validate, Refusal
 
 
+def event_lines(raw, expected):
+    """Preflight physical records in constant space before yielding any copies.
+
+    Match bytes.splitlines LF/CR/CRLF and terminal-delimiter semantics. The
+    declared count never controls an allocation until actual shape is checked.
+    """
+    count, start, index = 0, 0, 0
+    while index < len(raw):
+        value = raw[index]
+        if value in (10, 13):
+            count += 1
+            if count > expected or index - start > 4096:
+                unsupported()
+            index += 1
+            if value == 13 and index < len(raw) and raw[index] == 10:
+                index += 1
+            start = index
+        else:
+            index += 1
+            if index - start > 4096:
+                unsupported()
+    if start < len(raw):
+        count += 1
+    if not count or count != expected:
+        unsupported()
+    start, index = 0, 0
+    while index < len(raw):
+        value = raw[index]
+        if value in (10, 13):
+            yield raw[start:index]
+            index += 1
+            if value == 13 and index < len(raw) and raw[index] == 10:
+                index += 1
+            start = index
+        else:
+            index += 1
+    if start < len(raw):
+        yield raw[start:]
+
+
 def coordinate(value):
     whole, numerator, denominator = (int(value[k]) for k in ('whole_us', 'numerator', 'denominator'))
     if numerator >= denominator or whole > MAX_EXTENT:
@@ -66,38 +106,51 @@ def inspect_program(data, local_output_delay_us=None, available_bytes=PREPARED_B
                     unsupported()
                 identities.add(identity)
                 previous = end
+            voiced = [u['source_audio'] for u in uses if u['source_audio'] is not None]
+            for use in uses:
+                source = use['source_audio']
+                if source is None:
+                    if int(use['native_audio_frames']):
+                        unsupported()
+                elif (not int(source['frames']) or Fraction(int(source['frames']) * 1000000, source['sample_rate'])
+                      > coordinate(use['end']) - coordinate(use['start'])):
+                    unsupported()
             audio = archive.read('audio.dat') if 'audio.dat' in names else b''
             if manifest['audio'] is None:
-                if audio or any(int(u['source_audio_frames']) or int(u['audio_start_frame']) for u in uses):
+                if audio or voiced or any(int(u['native_audio_frames']) or int(u['audio_start_frame']) for u in uses):
                     unsupported()
             else:
                 facts, extent, samples = wav_facts(audio)
+                mono = all(source['encoding'] == 'pcm_s16_le' and source['channels'] == 1
+                           and source['sample_rate'] == 48000 for source in voiced)
+                if (not voiced or facts['encoding'] != 'pcm_s16_le' or facts['sample_rate'] != 48000
+                        or facts['channels'] != (1 if mono else 2)):
+                    unsupported()
                 if facts != manifest['audio']:
                     unsupported()
                 expected_frames = (duration * facts['sample_rate'] + 999999) // 1000000
                 for use in uses:
+                    source = use['source_audio']
+                    native_count = ((int(source['frames']) * 48000 + source['sample_rate'] - 1)
+                                    // source['sample_rate']) if source is not None else 0
                     expected_start = coordinate(use['start']) * facts['sample_rate'] / 1000000
                     ceiled_start = -(-expected_start.numerator // expected_start.denominator)
                     if (int(use['audio_start_frame']) != ceiled_start
-                            or int(use['source_audio_frames']) * 1000000 > (coordinate(use['end']) - coordinate(use['start'])) * facts['sample_rate']
-                            or int(use['audio_start_frame']) + int(use['source_audio_frames']) > int(facts['frames'])):
+                            or int(use['native_audio_frames']) != native_count
+                            or int(use['audio_start_frame']) + int(use['native_audio_frames']) > int(facts['frames'])):
                         unsupported()
-                    expected_frames = max(expected_frames, int(use['audio_start_frame']) + int(use['source_audio_frames']))
+                    expected_frames = max(expected_frames, int(use['audio_start_frame']) + int(use['native_audio_frames']))
                 if int(facts['frames']) != expected_frames:
                     unsupported()
                 # The retained decoder continuously plays the full WAV. Every sample
                 # outside complete declared source spans must therefore be silence.
-                width = facts['channels'] * (2 if facts['encoding'] == 'pcm_s16_le' else 4)
+                width = facts['channels'] * 2
                 cursor = 0
                 def silence(first, last):
-                    gap = samples[first * width:last * width]
-                    if facts['encoding'] == 'pcm_s16_le':
-                        if any(gap):
-                            unsupported()
-                    elif any(sample != 0.0 for (sample,) in struct.iter_unpack('<f', gap)):
+                    if any(memoryview(samples)[first * width:last * width]):
                         unsupported()
                 for use in uses:
-                    start, count = int(use['audio_start_frame']), int(use['source_audio_frames'])
+                    start, count = int(use['audio_start_frame']), int(use['native_audio_frames'])
                     if not count:
                         continue
                     if start < cursor:
@@ -106,14 +159,10 @@ def inspect_program(data, local_output_delay_us=None, available_bytes=PREPARED_B
                     cursor = start + count
                 silence(cursor, int(facts['frames']))
             raw = archive.read('events.jsonl')
-            lines = raw.splitlines()
-            if not lines or len(lines) != int(manifest['event_count']) or len(lines) > 100000:
-                unsupported()
+            lines = event_lines(raw, int(manifest['event_count']))
             events, previous_key, counts, source_indices, motion_times = [], None, {}, {}, {}
             eyes = mouths = False
             for line in lines:
-                if len(line) > 4096:
-                    unsupported()
                 event = validate('event', decode(line), 'head-program')
                 use_id = int(event['use_id'])
                 if use_id >= len(uses):
@@ -172,6 +221,8 @@ def compile_source(bundle, delay_us=0, resume_auto=True):
     """Explicit local authoring maintenance input, compiled before native setup.
 
     This is source ingestion, not a second playback engine or HTTP content model.
+    Its internal metadata is not a serializable managed HTTP manifest: it owns no
+    managed asset/version identity and must never fabricate one.
     The invocation owns its generated local role/use identities and retains all source
     samples; the common player handles a movement tail after decoder completion.
     """
@@ -202,7 +253,8 @@ def compile_source(bundle, delay_us=0, resume_auto=True):
            'occurrence': {'use_id': str(uuid.uuid4()), 'path': []},
            'start': time(0), 'end': time(extent), 'resume_auto': resume_auto,
            'audio_start_frame': '0',
-           'source_audio_frames': bundle.facts['audio']['frames'] if bundle.audio else '0',
+           'source_audio': bundle.facts['audio'],
+           'native_audio_frames': bundle.facts['audio']['frames'] if bundle.audio else '0',
            'source_movement_extent_us': bundle.facts['movement_extent_us']}
     events = [(Fraction(0), {'at': time(0), 'use_id': '0', 'event': {'kind': 'begin'}})]
     for index, frame in enumerate(bundle.frames):

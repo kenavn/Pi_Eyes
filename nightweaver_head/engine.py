@@ -51,12 +51,22 @@ class ProgramPlayer:
                 fence()
             if program.audio and audio is None:
                 raise Refusal('audio_unavailable', 503)
+            # At origin, establish the use's eye mode before native audio starts.
+            # A leading silent gap retains idle mode until its authored Begin.
+            index = 0
+            if (program.events and program.events[0][0] == 0
+                    and program.events[0][1]['event']['kind'] == 'begin'):
+                active_use = program.manifest['uses'][int(program.events[0][1]['use_id'])]
+                self.ports.auto(False)
+                index = 1
+            if cancelled.is_set():
+                return None
             origin = self.clock.now()
             if program.audio:
                 self.ports.play()
             if started:
                 started()
-            index, last_position, last_observed = 0, None, None
+            last_position, last_observed = None, None
             physical = int(program.facts['duration_us'])
             if program.facts['audio'] is not None:
                 facts = program.facts['audio']

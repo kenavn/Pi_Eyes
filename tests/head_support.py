@@ -181,13 +181,17 @@ def time_at(us, numerator=0, denominator=1):
 
 
 def program(role=None, audio=None, resume=True, gap=1000, eye=False, delay=0):
+    from nightweaver_head.bundle import wav_facts
     role = role or uid()
     uses, events = [], []
     for index, (start, end) in enumerate(((0, 2000), (2000 + gap, 5000 + gap))):
         uses.append({'id': str(index), 'role_id': role, 'occurrence': {'use_id': uid(), 'path': []},
                      'start': time_at(start), 'end': time_at(end), 'resume_auto': resume,
-                     'audio_start_frame': str((start * 8000 + 999999) // 1000000) if audio else '0',
-                     'source_audio_frames': '8' if audio else '0', 'source_movement_extent_us': '1001'})
+                     'audio_start_frame': str((start * 48000 + 999999) // 1000000) if audio else '0',
+                     'source_content': {k: v for k, v in content(b'synthetic-original-source').items() if k != 'kind'},
+                     'source_audio': ({'encoding': 'pcm_s16_le', 'frames': '48',
+                                       'sample_rate': 48000, 'channels': wav_facts(audio)[0]['channels']} if audio else None),
+                     'native_audio_frames': '48' if audio else '0', 'source_movement_extent_us': '1001'})
         for at, kind in ((start, 'begin'), (start + 1000 + delay, 'mouth'), (end, 'end')):
             payload = {'kind': kind}
             if kind == 'mouth':
