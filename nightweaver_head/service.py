@@ -151,11 +151,11 @@ class Service:
         if boot != self.boot:
             raise Refusal('stale_owner', 409)
 
-    def check_session(self, request):
+    def check_session(self, request, allow_expired=False):
         self.tick()
         if request['session'] != self.session or request['lease_token'] != self.lease_token:
             raise Refusal('stale_owner', 409)
-        if self.expired or self.session is None:
+        if self.session is None or (self.expired and not allow_expired):
             raise Refusal('expired_session', 409)
 
     def check_owner(self, owner):
@@ -238,7 +238,8 @@ class Service:
         return response
 
     def receipt(self, authority, request, kind):
-        self.check_session(authority)
+        # Only the retained owner may clean up after losing playback authority.
+        self.check_session(authority, allow_expired=kind == 'disarm' and self.owner is not None)
         self.check_owner(authority['owner'])
         rev = int(authority['operation_revision'])
         retained = self.stop_receipt if self.stop_receipt and self.stop_receipt[0] == rev else self.receipts.get(rev)
