@@ -569,10 +569,131 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         await until(lambda: self.service.cleanup_task is None)
         self.assertFalse(self.service.prepared)
         self.assertTrue(self.service.retired)
-        with self.assertRaisesRegex(Refusal, 'expired_session'):
-            self.service.disarm({'authority': self.auth()})
+        request = {'authority': self.auth()}
+        status, disarmed = self.service.disarm(request)
+        self.assertEqual(status, 200)
+        self.assertEqual(disarmed['settlement'], 'settled')
+        self.assertEqual(disarmed['terminal_reason'], 'stopped')
+        self.assertIsNone(disarmed['failure'])
+        self.assertEqual(self.service.disarm(request), (status, disarmed))
+        self.assertEqual(self.service.lookup(disarmed['operation']), disarmed)
         closed = await self.service.close({k: self.lease[k] for k in ('session', 'lease_token')})
         self.assertEqual(closed['session'], self.lease['session'])
+
+    async def test_expired_disarm_preserves_authority_and_revision_fences(self):
+        prepared, prepare = await self.prepare()
+        self.clock.value = self.service.lease_until
+        self.service.tick()
+        await until(lambda: self.service.cleanup_task is None)
+        request = {'authority': self.auth()}
+        for field, value in (('lease_token', uid()), ('session', dict(self.lease['session'], session_id=uid())),
+                             ('owner', dict(self.owner, preparation_id=uid())),
+                             ('owner', dict(self.owner, command=dict(self.owner['command'],
+                                                                   command={'nonce': uid(), 'window_sequence': '1'})))):
+            wrong = copy.deepcopy(request)
+            wrong['authority'][field] = value
+            with self.assertRaisesRegex(Refusal, 'stale_owner'):
+                self.service.disarm(wrong)
+        with self.assertRaisesRegex(Refusal, 'revision_conflict'):
+            self.service.disarm({'authority': prepare['authority']})
+        # Cleanup admission does not restore playback or renewal authority.
+        with self.assertRaisesRegex(Refusal, 'expired_session'):
+            self.service.prepare(prepare)
+        with self.assertRaisesRegex(Refusal, 'expired_session'):
+            self.service.start({'authority': request['authority'], 'activity': activity(self.owner),
+                                'prepared_handle_id': prepared['handle_id']})
+        with self.assertRaisesRegex(Refusal, 'expired_session'):
+            self.service.renew(request['authority'])
+        _, disarmed = self.service.disarm(request)
+        with self.assertRaisesRegex(Refusal, 'stale_revision'):
+            self.service.disarm({'authority': authority(self.lease, self.owner, 0)})
+        self.assertEqual(self.service.disarm(request)[1], disarmed)
+        await self.service.close({k: self.lease[k] for k in ('session', 'lease_token')})
+        opened(self.service)
+        with self.assertRaisesRegex(Refusal, 'stale_owner'):
+            self.service.disarm(request)
+
+    async def test_expired_unclaimed_session_cannot_admit_new_cleanup_owner(self):
+        self.clock.value = self.service.lease_until
+        with self.assertRaisesRegex(Refusal, 'expired_session'):
+            self.service.disarm({'authority': self.auth()})
+        self.assertIsNone(self.service.owner)
+
+    async def test_expired_disarm_joins_running_output_before_releasing_owner(self):
+        prepared, _ = await self.prepare()
+        gate = threading.Event()
+        self.ports.cleanup_gate = gate
+        run = activity(self.owner)
+        self.service.start({'authority': self.auth(), 'activity': run,
+                            'prepared_handle_id': prepared['handle_id'], 'at': None,
+                            'lateness_allowance_us': '100000', 'local_output_delay_us': 250})
+        await until(self.ports.entered.is_set)
+        try:
+            self.clock.value = self.service.lease_until
+            request = {'authority': self.auth()}
+            _, disarmed = self.service.disarm(request)
+            self.assertEqual(disarmed['settlement'], 'pending')
+            self.clock.value += 5000001
+            self.assertEqual(self.service.lookup(disarmed['operation'])['settlement'], 'unknown')
+            self.assertIn(prepared['handle_id'], self.service.prepared)
+            with self.assertRaisesRegex(Refusal, 'prior_worker_unsettled'):
+                await self.service.close({k: self.lease[k] for k in ('session', 'lease_token')})
+        finally:
+            gate.set()
+        await until(lambda: self.service.worker_future.done())
+        self.service.tick()
+        self.service.tick()  # Output must join before the retained preparation disposal is scheduled.
+        await until(lambda: self.service.cleanup_task is None)
+        settled = self.service.lookup(disarmed['operation'])
+        self.assertEqual(settled['settlement'], 'settled')
+        self.assertIsNone(settled['failure'])
+        self.assertFalse(self.service.prepared)
+        self.assertEqual(self.service.disarm(request)[1], settled)
+
+    async def test_expired_disarm_joins_late_prepare_and_native_disposal(self):
+        self.data = program(self.owner['role_ids'][0], audio=wav(frames=288, rate=48000), delay=250)
+        self.content = program_content(self.data, self.owner)
+        Path(self.tmp.name, self.content['identity']['sha256']).write_bytes(self.data)
+        prepare_gate, dispose_gate, dispose_entered = threading.Event(), threading.Event(), threading.Event()
+        self.ports.prepare_gate = prepare_gate
+        original = self.ports.dispose
+        def dispose():
+            dispose_entered.set()
+            dispose_gate.wait()
+            original()
+        self.ports.dispose = dispose
+        prepare = {'authority': self.auth(), 'content': self.content,
+                   'expected_facts': inspect_program(self.data).facts, 'local_output_delay_us': 250}
+        _, preparing = self.service.prepare(prepare)
+        await until(self.ports.prepare_entered.is_set)
+        try:
+            self.clock.value = self.service.lease_until
+            request = {'authority': self.auth()}
+            _, disarmed = self.service.disarm(request)
+            self.assertEqual(disarmed['settlement'], 'pending')
+            prepare_gate.set()
+            await until(dispose_entered.is_set)
+            # No handle was published, but the provisional native owner still exists.
+            self.assertFalse(self.service.prepared)
+            self.assertFalse(self.ports.resources[0].closed)
+            self.clock.value += 5000001
+            self.assertEqual(self.service.lookup(disarmed['operation'])['settlement'], 'unknown')
+            self.assertEqual(self.service.disarm(request)[1]['settlement'], 'unknown')
+            with self.assertRaisesRegex(Refusal, 'prior_worker_unsettled'):
+                await self.service.close({k: self.lease[k] for k in ('session', 'lease_token')})
+        finally:
+            prepare_gate.set()
+            dispose_gate.set()
+        await until(lambda: self.service.ordinary is None)
+        settled = self.service.lookup(disarmed['operation'])
+        self.assertEqual(settled['settlement'], 'settled')
+        self.assertIsNone(settled['failure'])
+        failed = self.service.lookup(preparing['operation'])
+        self.assertEqual(failed['failure'], 'expired_session')
+        self.assertIsNone(failed['prepared'])
+        self.assertTrue(self.ports.resources[0].closed)
+        self.assertEqual(self.ports.resources[0].close_count, 1)
+        self.assertFalse(any(event[0] == 'play' for event in self.ports.events))
 
     async def test_stop_during_active_use_joins_before_settlement_and_retains(self):
         prepared, _ = await self.prepare()
@@ -675,6 +796,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         try:
             self.clock.value += 5000001
             self.service.tick()
+            self.assertEqual(self.service.disarm(request)[1]['settlement'], 'unknown')
             self.assertIn(prepared['handle_id'], self.service.prepared)
             with self.assertRaisesRegex(Refusal, 'prior_worker_unsettled'):
                 await self.service.close({k: self.lease[k] for k in ('session', 'lease_token')})
@@ -729,6 +851,17 @@ class UnknownCleanupTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(service.session, lease['session'])
             self.assertTrue(service.retired)
             self.assertFalse(service.quiet())
+            clock.value = service.lease_until
+            request = {'authority': authority(lease, owner, 2)}
+            _, disarmed = service.disarm(request)
+            self.assertEqual(disarmed['settlement'], 'pending')
+            clock.value += 5000001
+            retained = service.lookup(disarmed['operation'])
+            self.assertEqual(retained['settlement'], 'unknown')
+            self.assertEqual(retained['failure'], 'unknown_outcome')
+            self.assertEqual(service.disarm(request)[1], retained)
+            with self.assertRaisesRegex(Refusal, 'prior_worker_unsettled'):
+                await service.close({k: lease[k] for k in ('session', 'lease_token')})
             self.assertFalse(await service.shutdown())
             service.output.shutdown(wait=True)
             service.inspector.shutdown(wait=True)
